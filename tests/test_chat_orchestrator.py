@@ -557,8 +557,8 @@ def test_unsupported_structured_aggregates_do_not_use_partial_tool_results(
     body = response.json()
     answer = body["answer_markdown"]
 
-    assert "don't have a reliable full-property tool" in answer
-    assert "won't calculate it from partial rows" in answer
+    assert "can't calculate" in answer
+    assert "won't derive it from partial rows" in answer
     assert body["components"] == []
     assert body["sources"] == []
     assert set(body["tool_results"]) == {"property_profile"}
