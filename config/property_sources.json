@@ -1,0 +1,153 @@
+{
+  "115r": {
+    "property_name": "Canfield Park",
+    "address": "306 Canfield Avenue, Bridgeport, CT 06605",
+    "primary_site": "https://canfield-park.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "126a": {
+    "property_name": "The Halden",
+    "address": "1137 Westchester Ave, West Harrison, NY 10604",
+    "primary_site": "https://www.thehalden.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "126r": {
+    "property_name": "The Halden",
+    "address": "1137 Westchester Ave, West Harrison, NY 10604",
+    "primary_site": "https://www.thehalden.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "134c": {
+    "property_name": "55 Riverwalk Place",
+    "address": "55 Riverwalk Place, West New York, NJ 07093",
+    "primary_site": "https://55riverwalkplace.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/", "/residents/"]
+  },
+  "134land": {
+    "property_name": "55 Riverwalk Place",
+    "address": "55 Riverwalk Place, West New York, NJ 07093",
+    "primary_site": "https://55riverwalkplace.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/", "/residents/"]
+  },
+  "134r": {
+    "property_name": "Fifty-Five Riverwalk Place",
+    "address": "55 Riverwalk Place, West New York, NJ 07093",
+    "primary_site": "https://55riverwalkplace.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/", "/residents/"]
+  },
+  "138a": {
+    "property_name": "Everbend",
+    "address": "1202 Crescent Drive, Tarrytown, NY 10591",
+    "primary_site": "https://everbendny.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "138r": {
+    "property_name": "Everbend",
+    "address": "1202 Crescent Drive, Tarrytown, NY 10591",
+    "primary_site": "https://everbendny.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "139c": {
+    "property_name": "The Mill Greenwich",
+    "address": "10 Glenville Street, Greenwich, CT 06831",
+    "primary_site": "https://themillgreenwich.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "139r": {
+    "property_name": "The Mill Greenwich",
+    "address": "10 Glenville Street, Greenwich, CT 06831",
+    "primary_site": "https://themillgreenwich.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "143a": {
+    "property_name": "The Ellsworth",
+    "address": "2113 Ellsworth Blvd, Malta, NY 12020",
+    "primary_site": "https://ellsworthny.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "143c": {
+    "property_name": "The Ellsworth",
+    "address": "2113 Ellsworth Blvd, Malta, NY 12020",
+    "primary_site": "https://ellsworthny.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "144r": {
+    "property_name": "Winner's Circle at Saratoga",
+    "address": "100 Madison Drive, Ballston Spa, NY 12020",
+    "primary_site": "https://winnerscircleatsaratoga.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/", "/p/new-construction/"]
+  },
+  "153a": {
+    "property_name": "Abbot Mill",
+    "address": "1 Pleasant Street, Westford, MA 01886",
+    "primary_site": "https://abbotmill.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "153c": {
+    "property_name": "Abbot Mill",
+    "address": "1 Pleasant Street, Westford, MA 01886",
+    "primary_site": "https://abbotmill.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "153r": {
+    "property_name": "Abbot Mill",
+    "address": "1 Pleasant Street, Westford, MA 01886",
+    "primary_site": "https://abbotmill.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "175r": {
+    "property_name": "Kinwood",
+    "address": "2 River Chase Drive, Rensselaer, NY 12144",
+    "primary_site": "https://kinwoodny.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "176r": {
+    "property_name": "The Alexander",
+    "address": "255 Patroon Creek Blvd, Albany, NY 12206",
+    "primary_site": "https://alexanderalbany.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "183a": {
+    "property_name": "Luckey Platt",
+    "address": "57 Cannon Street, Poughkeepsie, NY 12601",
+    "primary_site": "https://luckeyplatt.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "183c": {
+    "property_name": "Luckey Platt",
+    "address": "57 Cannon Street, Poughkeepsie, NY 12601",
+    "primary_site": "https://luckeyplatt.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "183r": {
+    "property_name": "Luckey Platt",
+    "address": "57 Cannon Street, Poughkeepsie, NY 12601",
+    "primary_site": "https://luckeyplatt.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "184r": {
+    "property_name": "Lakeshore Preserve",
+    "address": "557 Broadway, Port Ewen, NY 12466",
+    "primary_site": "https://livelakeshorepreserve.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "185r": {
+    "property_name": "Waterfront at the Strand",
+    "address": "111 Hudson Valley Landing, Kingston, NY 12401",
+    "primary_site": "https://livewaterfrontstrand.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "462a": {
+    "property_name": "Stony Run at the Stockade",
+    "address": "305 Hurley Ave, Kingston, NY 12401",
+    "primary_site": "https://stonyrunstockade.com/",
+    "seed_paths": ["/", "/floorplans/", "/amenities/", "/gallery/", "/neighborhood/", "/contact/"]
+  },
+  "altapm": {
+    "property_name": "AltaPM",
+    "address": null,
+    "primary_site": null,
+    "seed_paths": [],
+    "notes": "No property-specific public leasing site was identified during source discovery. Treat as out of scope for the representative unstructured sample unless a source is provided."
+  }
+}

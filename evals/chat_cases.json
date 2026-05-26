@@ -1,0 +1,42 @@
+[
+  {
+    "name": "canfield_occupancy_and_ev",
+    "property_code": "115r",
+    "model": "mock:mock-property-assistant",
+    "message": "What is the latest occupancy and does it mention EV charging?",
+    "expected_answer_terms": ["Canfield Park", "96.66"],
+    "expected_component_types": ["kpi_card"],
+    "expected_tool_keys": ["property_profile", "latest_kpis", "property_content"],
+    "expected_source_property_code": "115r"
+  },
+  {
+    "name": "luckey_top_balances",
+    "property_code": "183r",
+    "model": "mock:mock-property-assistant",
+    "message": "Show latest occupancy and top balance units.",
+    "expected_answer_terms": ["Luckey Platt", "100.0"],
+    "expected_component_types": ["kpi_card", "table"],
+    "expected_tool_keys": ["property_profile", "latest_kpis", "top_balances"],
+    "expected_source_property_code": null
+  },
+  {
+    "name": "halden_floorplans",
+    "property_code": "126r",
+    "model": "mock:mock-property-assistant",
+    "message": "What floorplans are advertised on the website?",
+    "expected_answer_terms": ["The Halden"],
+    "expected_component_types": [],
+    "expected_tool_keys": ["property_profile", "property_content"],
+    "expected_source_property_code": "126r"
+  },
+  {
+    "name": "canfield_ambiguous_compare",
+    "property_code": "115r",
+    "model": "mock:mock-property-assistant",
+    "message": "Compare",
+    "expected_answer_terms": ["Canfield Park", "What would you like to look at", "Rent-roll KPIs"],
+    "expected_component_types": [],
+    "expected_tool_keys": ["property_profile"],
+    "expected_source_property_code": null
+  }
+]

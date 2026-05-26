@@ -1,0 +1,76 @@
+{
+  "judge": "codex_manual_local_judge",
+  "external_llm_used": false,
+  "evaluated_report": "evals/golden_report.json",
+  "evaluated_at": "2026-05-24",
+  "case_count": 24,
+  "retrieval_case_count": 12,
+  "summary": {
+    "retrieval_precision_at_k": 1.0,
+    "retrieval_mrr": 1.0,
+    "retrieval_ndcg_at_k": 1.0,
+    "retrieval_evidence_term_recall": 1.0,
+    "retrieval_property_scope_accuracy": 1.0,
+    "generation_faithfulness": 1.0,
+    "generation_answer_relevancy": 0.979,
+    "generation_completeness": 0.958,
+    "generation_citation_quality": 0.975,
+    "generation_overall": 0.975
+  },
+  "coverage": [
+    "latest structured KPIs",
+    "ambiguous-query clarification",
+    "unavailable year guardrail",
+    "unknown property code guardrail",
+    "occupancy trend chart",
+    "vacant-unit table",
+    "charge breakdown chart",
+    "rent by unit type chart",
+    "top balances table",
+    "combined structured query",
+    "amenity list retrieval",
+    "targeted yes/no amenity retrieval",
+    "negative website-evidence answer",
+    "active property scoping when another property name is mentioned",
+    "apartment-feature retrieval",
+    "gallery retrieval",
+    "location fallback",
+    "floorplan retrieval across multiple properties"
+  ],
+  "strengths": [
+    "Property scoping held in every retrieval case, including the case where the user mentioned The Alexander while the active property code was 115r.",
+    "When a prompt mentions a different known property, the assistant now adds an inline scope note before answering from the active property.",
+    "Structured outputs are grounded in MySQL tool results and produce the expected UI components for KPI cards, charts, and tables.",
+    "Website answers now avoid irrelevant chunks for pet-friendly, parking, washer/dryer, EV charging, and bike-storage questions.",
+    "The assistant asks for clarification on low-information prompts instead of running broad SQL and retrieval calls.",
+    "Unavailable year requests no longer fall back to the latest 2025 data."
+  ],
+  "residual_risks": [
+    {
+      "case": "canfield_gallery_photos",
+      "score": 0.85,
+      "note": "Grounded and correctly sourced, but the answer is sparse. A richer UX would show gallery thumbnails or grouped image captions."
+    },
+    {
+      "case": "canfield_location_context",
+      "score": 0.85,
+      "note": "The address fallback is correct, but the scraped sample does not contain a clean neighborhood page for this property."
+    },
+    {
+      "case": "canfield_negative_pickleball",
+      "score": 0.9,
+      "note": "The no-evidence answer is safer than hallucinating, but it could be improved by explicitly saying which scoped website page was checked."
+    },
+    {
+      "case": "canfield_active_scope_over_mentioned_property",
+      "score": 0.95,
+      "note": "The result is correctly scoped to Canfield Park and includes an inline scope note. The remaining opportunity is a UI-level property-switch suggestion."
+    },
+    {
+      "case": "alexander_floorplans_cross_property",
+      "score": 0.95,
+      "note": "The categories and source are correct; the answer includes a representative subset of individual floorplan pages."
+    }
+  ],
+  "verdict": "The expanded golden set passes deterministic checks and looks strong under a local LLM-judge style review. The main improvement opportunities are richer gallery/location UX, clearer negative-evidence wording, and a UI-level property-switch suggestion when another property is mentioned."
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "name": "canfield_ev_charging",
+    "property_code": "115r",
+    "query": "Does this property have EV charging?",
+    "page_type": "amenities",
+    "n_results": 3,
+    "expected_terms": ["EV Charging Stations"],
+    "expected_page_type": "amenities"
+  },
+  {
+    "name": "luckey_bike_storage",
+    "property_code": "183r",
+    "query": "Does this property have bike storage or a bike repair room?",
+    "page_type": "amenities",
+    "n_results": 3,
+    "expected_terms": ["Bike storage", "bike repair room"],
+    "expected_page_type": "amenities"
+  },
+  {
+    "name": "alexander_pool_fitness",
+    "property_code": "176r",
+    "query": "What amenities mention pool or fitness?",
+    "page_type": "amenities",
+    "n_results": 3,
+    "expected_terms": ["Pool", "Fitness"],
+    "expected_page_type": "amenities"
+  }
+]

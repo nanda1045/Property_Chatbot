@@ -1,0 +1,20 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Local generated stores
+Data/chroma/
+Data/models/
+chroma/
+
+# Keep generated data if intentionally packaged; ignore local MySQL volume noise.
+mysql-data/
+
+# Frontend local artifacts
+frontend/node_modules/
+frontend/dist/

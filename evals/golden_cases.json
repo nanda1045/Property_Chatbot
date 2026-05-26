@@ -1,0 +1,579 @@
+[
+  {
+    "name": "canfield_latest_kpis",
+    "property_code": "115r",
+    "message": "What is the latest occupancy, market rent, lease charges, and vacant unit count for this property?",
+    "tags": ["structured", "kpi"],
+    "generation": {
+      "required_terms": ["Canfield Park", "96.66%", "300 units", "$741,209", "$804,981", "10 vacant units"],
+      "forbidden_terms": ["2024", "loaded structured data"],
+      "expected_component_types": ["kpi_card"],
+      "expected_tool_keys": ["property_profile", "latest_kpis"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_executive_summary",
+    "property_code": "115r",
+    "message": "Give me a quick executive summary of this property.",
+    "tags": ["structured", "summary", "executive"],
+    "generation": {
+      "required_terms": ["Quick executive summary", "highly occupied", "$63,772", "stabilized property"],
+      "forbidden_terms": ["The latest summary shows", "website evidence", "loaded structured data"],
+      "expected_component_types": ["kpi_card"],
+      "expected_tool_keys": ["property_profile", "latest_kpis"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_leadership_overview_semantic",
+    "property_code": "115r",
+    "message": "Give me a leadership overview.",
+    "tags": ["structured", "summary", "semantic_intent_routing"],
+    "generation": {
+      "required_terms": ["Canfield Park", "Quick executive summary", "highly occupied", "$63,772"],
+      "forbidden_terms": ["The latest summary shows", "website evidence", "loaded structured data"],
+      "expected_component_types": ["kpi_card"],
+      "expected_tool_keys": ["property_profile", "latest_kpis"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_ambiguous_compare",
+    "property_code": "115r",
+    "message": "Compare",
+    "tags": ["clarification", "ambiguous"],
+    "generation": {
+      "required_terms": ["Canfield Park", "What would you like to look at", "Rent-roll KPIs", "Website details"],
+      "forbidden_terms": ["Latest rent-roll snapshot", "Relevant website evidence", "loaded structured data"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_ambiguous_charges",
+    "property_code": "115r",
+    "message": "charges",
+    "tags": ["clarification", "ambiguous", "charges"],
+    "generation": {
+      "required_terms": ["Canfield Park", "What charge view would you like", "Biggest charge categories", "Rent vs lease charges comparison"],
+      "forbidden_terms": ["As of **2025-12-01**, occupancy is", "Relevant website evidence", "loaded structured data"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_reviews_unavailable",
+    "property_code": "115r",
+    "message": "Can you provide the reviews for this property?",
+    "tags": ["retrieval", "reviews", "negative_evidence"],
+    "generation": {
+      "required_terms": ["Canfield Park", "don't see matching website evidence for reviews"],
+      "forbidden_terms": ["96.66%", "Occupancy", "Lease Charges", "Vacant Units", "amenities"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_unknown_website_fact_unavailable",
+    "property_code": "115r",
+    "message": "Do they have package lockers?",
+    "tags": ["retrieval", "negative_evidence", "unknown_property_fact"],
+    "generation": {
+      "required_terms": ["Canfield Park", "don't see matching website evidence"],
+      "forbidden_terms": ["96.66%", "Occupancy", "Lease Charges", "Vacant Units", "amenities"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_2024_unavailable",
+    "property_code": "115r",
+    "message": "I want the breakdown for lease charges for the year 2024 only.",
+    "tags": ["structured", "date_guardrail"],
+    "generation": {
+      "required_terms": ["Canfield Park", "2024", "don't have rent-roll data"],
+      "forbidden_terms": ["2025-12-01, the largest charge categories", "loaded structured data"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "report_periods"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "unknown_property_code",
+    "property_code": "missing-code",
+    "message": "What is the occupancy?",
+    "tags": ["guardrail", "unknown_property"],
+    "generation": {
+      "required_terms": ["could not find property code", "missing-code"],
+      "forbidden_terms": ["Canfield Park", "Latest rent-roll snapshot"],
+      "expected_component_types": [],
+      "expected_tool_keys": [],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_occupancy_trend",
+    "property_code": "115r",
+    "message": "Show me the occupancy trend over time.",
+    "tags": ["structured", "trend", "chart"],
+    "generation": {
+      "required_terms": ["Canfield Park", "12-month trend window", "2025-01-01", "2025-12-01", "percentage points"],
+      "forbidden_terms": ["website evidence", "loaded structured data"],
+      "expected_component_types": ["line_chart"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "occupancy_trend"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_occupancy_change_across_available_months",
+    "property_code": "115r",
+    "message": "What changed in occupancy across the available months?",
+    "tags": ["structured", "trend", "chart", "intent_routing"],
+    "generation": {
+      "required_terms": ["Canfield Park", "12-month trend window", "percentage points"],
+      "forbidden_terms": ["website evidence", "loaded structured data", "As of **2025-12-01**, occupancy is"],
+      "expected_component_types": ["line_chart"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "occupancy_trend"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_occupancy_move_each_month_semantic",
+    "property_code": "115r",
+    "message": "How did occupancy move each month?",
+    "tags": ["structured", "trend", "chart", "semantic_intent_routing"],
+    "generation": {
+      "required_terms": ["Canfield Park", "12-month trend window", "percentage points"],
+      "forbidden_terms": ["website evidence", "loaded structured data", "As of **2025-12-01**, occupancy is"],
+      "expected_component_types": ["line_chart"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "occupancy_trend"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_vacant_unit_detail",
+    "property_code": "115r",
+    "message": "Which units are vacant right now?",
+    "tags": ["structured", "vacancy", "table"],
+    "generation": {
+      "required_terms": ["Canfield Park", "vacant units include", "A105", "A125", "115mxB01", "2-bedroom"],
+      "forbidden_terms": ["website evidence", "loaded structured data", "broader bedroom category averages"],
+      "expected_component_types": ["table"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "vacant_units"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_vacant_units_with_unit_types",
+    "property_code": "115r",
+    "message": "Show vacant units and their unit types.",
+    "tags": ["structured", "vacancy", "table", "intent_routing"],
+    "generation": {
+      "required_terms": ["Canfield Park", "vacant units include", "A105", "115mxB01", "2-bedroom"],
+      "forbidden_terms": ["broader bedroom category averages", "top average rents", "website evidence"],
+      "expected_component_types": ["table"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "vacant_units"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_open_units_by_layout_semantic",
+    "property_code": "115r",
+    "message": "Open units by layout",
+    "tags": ["structured", "vacancy", "table", "semantic_intent_routing"],
+    "generation": {
+      "required_terms": ["Canfield Park", "vacant units include", "A105", "2-bedroom"],
+      "forbidden_terms": ["broader bedroom category averages", "website evidence"],
+      "expected_component_types": ["table"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "vacant_units"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_ev_bike_amenities",
+    "property_code": "115r",
+    "message": "Does this property have bike storage or EV charging? Use only data for the selected property and cite the website source.",
+    "tags": ["retrieval", "amenities", "yes_no"],
+    "retrieval": {
+      "page_type": "amenities",
+      "n_results": 5,
+      "required_terms": ["EV Charging Stations", "Bike Racks & Storage Lockers"],
+      "expected_page_type": "amenities"
+    },
+    "generation": {
+      "required_terms": ["Yes", "bike storage", "EV charging"],
+      "forbidden_terms": ["Apartment Features: Hardwood Flooring"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://canfield-park.com/amenities/"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "canfield_pet_friendly",
+    "property_code": "115r",
+    "message": "Is this property pet-friendly? Cite the website source.",
+    "tags": ["retrieval", "amenities", "yes_no"],
+    "retrieval": {
+      "page_type": "amenities",
+      "n_results": 5,
+      "required_terms": ["Pet Spa"],
+      "expected_page_type": "amenities"
+    },
+    "generation": {
+      "required_terms": ["Yes", "pet-friendly", "Pet Spa"],
+      "forbidden_terms": ["Apartment Features: Stainless Steel"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://canfield-park.com/amenities/"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "canfield_covered_parking",
+    "property_code": "115r",
+    "message": "Does this property have covered parking? Cite the website source.",
+    "tags": ["retrieval", "amenities", "yes_no"],
+    "retrieval": {
+      "page_type": "amenities",
+      "n_results": 5,
+      "required_terms": ["Covered Parking"],
+      "expected_page_type": "amenities"
+    },
+    "generation": {
+      "required_terms": ["Yes", "Covered Parking"],
+      "forbidden_terms": ["Canfield Park (`176r`)"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://canfield-park.com/amenities/"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "canfield_negative_pickleball",
+    "property_code": "115r",
+    "message": "Does this property have pickleball courts? Cite the website source.",
+    "tags": ["retrieval", "negative_evidence", "yes_no"],
+    "generation": {
+      "required_terms": ["Canfield Park", "don't see matching website evidence"],
+      "forbidden_terms": ["Yes", "pickleball courts."],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "canfield_active_scope_over_mentioned_property",
+    "property_code": "115r",
+    "message": "For The Alexander, does it have a pool? Use the selected property only.",
+    "tags": ["retrieval", "property_scope", "yes_no"],
+    "retrieval": {
+      "page_type": "amenities",
+      "n_results": 5,
+      "required_terms": ["Pool with Cabanas"],
+      "expected_page_type": "amenities"
+    },
+    "generation": {
+      "required_terms": ["Scope note", "You mentioned **The Alexander**", "active property is **Canfield Park (`115r`)**", "Pool with Cabanas"],
+      "forbidden_terms": ["The Alexander (`176r`)", "Indoor & Outdoor Swimming Pools"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://canfield-park.com/amenities/"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "canfield_amenity_list",
+    "property_code": "115r",
+    "message": "What amenities are listed on the property website?",
+    "tags": ["retrieval", "amenities", "list_answer"],
+    "retrieval": {
+      "page_type": "amenities",
+      "n_results": 5,
+      "required_terms": ["Pool with Cabanas", "Fitness Center", "EV Charging Stations"],
+      "expected_page_type": "amenities"
+    },
+    "generation": {
+      "required_terms": ["Community Features", "Pool with Cabanas", "EV Charging Stations", "Apartment Features"],
+      "forbidden_terms": ["Image:", "306 Canfield Avenue"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://canfield-park.com/amenities/"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "canfield_apartment_features",
+    "property_code": "115r",
+    "message": "What apartment features are listed on the website?",
+    "tags": ["retrieval", "amenities", "list_answer"],
+    "retrieval": {
+      "page_type": "amenities",
+      "n_results": 5,
+      "required_terms": ["Washer & Dryer", "Stainless Steel Appliances"],
+      "expected_page_type": "amenities"
+    },
+    "generation": {
+      "required_terms": ["Apartment Features", "Washer & Dryer", "Stainless Steel Appliances"],
+      "forbidden_terms": ["Community Features", "306 Canfield Avenue"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://canfield-park.com/amenities/"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "canfield_washer_dryer",
+    "property_code": "115r",
+    "message": "Do units include washer and dryer? Cite the website source.",
+    "tags": ["retrieval", "amenities", "yes_no"],
+    "retrieval": {
+      "page_type": "amenities",
+      "n_results": 5,
+      "required_terms": ["Washer & Dryer"],
+      "expected_page_type": "amenities"
+    },
+    "generation": {
+      "required_terms": ["Yes", "Washer & Dryer"],
+      "forbidden_terms": ["latest rent-roll snapshot", "loaded structured data"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://canfield-park.com/amenities/"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "canfield_gallery_photos",
+    "property_code": "115r",
+    "message": "Show photos from the gallery for this property and cite the source.",
+    "tags": ["retrieval", "gallery"],
+    "retrieval": {
+      "page_type": "gallery",
+      "n_results": 5,
+      "required_terms": ["Your Apartment", "Your Community"],
+      "expected_page_type": "gallery"
+    },
+    "generation": {
+      "required_terms": ["Your Apartment", "Your Community"],
+      "forbidden_terms": ["The Alexander", "loaded structured data"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://canfield-park.com/gallery/"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "canfield_location_only",
+    "property_code": "115r",
+    "message": "Where is this property located?",
+    "tags": ["profile", "location"],
+    "generation": {
+      "required_terms": ["Canfield Park", "306 Canfield Avenue", "Bridgeport, CT 06605"],
+      "forbidden_terms": ["Relevant website evidence", "A04", "floorplans"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_location_context",
+    "property_code": "115r",
+    "message": "Where is this property located and what neighborhood context does the website mention?",
+    "tags": ["retrieval", "location", "fallback"],
+    "generation": {
+      "required_terms": ["Canfield Park", "306 Canfield Avenue", "Bridgeport, CT 06605"],
+      "forbidden_terms": ["I found the property, but no matching data", "The Alexander"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_floorplans",
+    "property_code": "115r",
+    "message": "What floorplans are advertised on the website?",
+    "tags": ["retrieval", "floorplans", "source_compaction"],
+    "retrieval": {
+      "page_type": "floorplans",
+      "n_results": 10,
+      "required_terms": ["A04", "1 bed", "sq. ft."],
+      "expected_page_type": "floorplans"
+    },
+    "generation": {
+      "required_terms": ["Studio", "1-bedroom", "2-bedroom", "individual floorplan pages", "sq. ft."],
+      "forbidden_terms": ["Monthly leasing prices", "artist"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://canfield-park.com/floorplans/"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "canfield_charge_breakdown",
+    "property_code": "115r",
+    "message": "What are the biggest charge categories for this property?",
+    "tags": ["structured", "chart"],
+    "generation": {
+      "required_terms": ["RENT", "$761,929", "PARKING", "$28,490"],
+      "forbidden_terms": ["2024"],
+      "expected_component_types": ["bar_chart"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "charge_breakdown"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_income_buckets_semantic",
+    "property_code": "115r",
+    "message": "Show the largest income buckets.",
+    "tags": ["structured", "chart", "semantic_intent_routing"],
+    "generation": {
+      "required_terms": ["largest charge categories", "RENT", "$761,929", "PARKING"],
+      "forbidden_terms": ["website evidence", "loaded structured data"],
+      "expected_component_types": ["bar_chart"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "charge_breakdown"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_rent_lease_latest_month_comparison",
+    "property_code": "115r",
+    "message": "Compare rent and lease charges for the latest month.",
+    "tags": ["structured", "comparison", "intent_routing"],
+    "generation": {
+      "required_terms": ["market rent is **$741,209**", "lease charges are **$804,981**", "higher than market rent"],
+      "forbidden_terms": ["Occupancy stayed high", "12-month trend window", "website evidence"],
+      "expected_component_types": ["comparison_view"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "rent_lease_comparison"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_market_rent_against_lease_semantic",
+    "property_code": "115r",
+    "message": "Market rent against lease charges",
+    "tags": ["structured", "comparison", "semantic_intent_routing"],
+    "generation": {
+      "required_terms": ["market rent is **$741,209**", "lease charges are **$804,981**", "higher than market rent"],
+      "forbidden_terms": ["As of **2025-12-01**, occupancy is", "Occupancy stayed high", "website evidence"],
+      "expected_component_types": ["comparison_view"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "rent_lease_comparison"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_rent_vs_lease_charges_followup",
+    "property_code": "115r",
+    "message": "Rent vs lease charges comparison",
+    "tags": ["structured", "comparison", "followup_label", "intent_routing"],
+    "generation": {
+      "required_terms": ["market rent is **$741,209**", "lease charges are **$804,981**", "higher than market rent"],
+      "forbidden_terms": ["As of **2025-12-01**, occupancy is", "Occupancy stayed high", "12-month trend window", "website evidence"],
+      "expected_component_types": ["comparison_view"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "rent_lease_comparison"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "canfield_rent_by_unit_type",
+    "property_code": "115r",
+    "message": "Compare average market rent by unit type.",
+    "tags": ["structured", "chart"],
+    "generation": {
+      "required_terms": ["broader bedroom category averages", "1-bedroom", "2-bedroom", "115mxB04", "$2,850"],
+      "forbidden_terms": ["website evidence"],
+      "expected_component_types": ["bar_chart"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "rent_by_unit_type", "rent_by_bedroom_category"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "luckey_combined_kpi_and_balances",
+    "property_code": "183r",
+    "message": "Show latest occupancy and top balance units.",
+    "tags": ["structured", "combined", "table"],
+    "generation": {
+      "required_terms": ["Luckey Platt", "100.0%", "highest resident balances", "unit 506"],
+      "forbidden_terms": ["Canfield Park", "website evidence"],
+      "expected_component_types": ["kpi_card", "table"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "top_balances"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "luckey_top_balances",
+    "property_code": "183r",
+    "message": "Which units have the highest balances?",
+    "tags": ["structured", "table"],
+    "generation": {
+      "required_terms": ["Luckey Platt", "highest resident balances", "unit"],
+      "forbidden_terms": ["Canfield Park"],
+      "expected_component_types": ["table"],
+      "expected_tool_keys": ["property_profile", "latest_kpis", "top_balances"],
+      "max_source_count": 0
+    }
+  },
+  {
+    "name": "alexander_pool_fitness",
+    "property_code": "176r",
+    "message": "What amenities mention pool or fitness?",
+    "tags": ["retrieval", "amenities"],
+    "retrieval": {
+      "page_type": "amenities",
+      "n_results": 5,
+      "required_terms": ["Pool", "Fitness"],
+      "expected_page_type": "amenities"
+    },
+    "generation": {
+      "required_terms": ["Pool", "Fitness"],
+      "forbidden_terms": ["Canfield Park"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_property_code": "176r"
+    }
+  },
+  {
+    "name": "alexander_floorplans_cross_property",
+    "property_code": "176r",
+    "message": "What floorplans are advertised on the website?",
+    "tags": ["retrieval", "floorplans", "property_scope"],
+    "retrieval": {
+      "page_type": "floorplans",
+      "n_results": 10,
+      "required_terms": ["A03", "1 bed", "sq. ft."],
+      "expected_page_type": "floorplans"
+    },
+    "generation": {
+      "required_terms": ["The Alexander", "1-bedroom", "2-bedroom", "3-bedroom", "A03"],
+      "forbidden_terms": ["Canfield Park", "Follow Us on Instagram"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://alexanderalbany.com/floorplans/"],
+      "max_source_count": 1
+    }
+  },
+  {
+    "name": "halden_floorplans",
+    "property_code": "126r",
+    "message": "What floorplans are advertised on the website?",
+    "tags": ["retrieval", "floorplans", "property_scope"],
+    "retrieval": {
+      "page_type": "floorplans",
+      "n_results": 10,
+      "required_terms": ["A2", "1 bed", "sq. ft."],
+      "expected_page_type": "floorplans"
+    },
+    "generation": {
+      "required_terms": ["The Halden", "1-bedroom", "2-bedroom", "3-bedroom", "A2"],
+      "forbidden_terms": ["Canfield Park", "THERE'S ROOM FOR YOU"],
+      "expected_component_types": [],
+      "expected_tool_keys": ["property_profile", "property_content"],
+      "expected_source_urls": ["https://thehalden.com/floorplans/"],
+      "max_source_count": 1
+    }
+  }
+]

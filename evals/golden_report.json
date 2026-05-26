@@ -1,0 +1,2815 @@
+{
+  "cases": [
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nAs of **2025-12-01**, occupancy is **96.66%** across **300 units**. Market rent is **$741,209** and lease charges are **$804,981**. The latest summary shows **10 vacant units**.",
+          "component_types": [
+            "kpi_card"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['kpi_card'], actual=['kpi_card']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile'], actual=['latest_kpis', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "What is the latest occupancy, market rent, lease charges, and vacant unit count for this property?",
+      "name": "canfield_latest_kpis",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "kpi"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nQuick executive summary: as of **2025-12-01**, this property is highly occupied at **96.66%** across **300 units**, with **10 vacant units**. Market rent is **$741,209** and lease charges are **$804,981**, putting lease charges **$63,772** above market rent (**8.6%** difference). Overall, the latest snapshot suggests a stabilized property with strong occupancy and meaningful monthly lease-charge volume.",
+          "component_types": [
+            "kpi_card"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['kpi_card'], actual=['kpi_card']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile'], actual=['latest_kpis', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Give me a quick executive summary of this property.",
+      "name": "canfield_executive_summary",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "summary",
+        "executive"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nQuick executive summary: as of **2025-12-01**, this property is highly occupied at **96.66%** across **300 units**, with **10 vacant units**. Market rent is **$741,209** and lease charges are **$804,981**, putting lease charges **$63,772** above market rent (**8.6%** difference). Overall, the latest snapshot suggests a stabilized property with strong occupancy and meaningful monthly lease-charge volume.",
+          "component_types": [
+            "kpi_card"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['kpi_card'], actual=['kpi_card']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile'], actual=['latest_kpis', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Give me a leadership overview.",
+      "name": "canfield_leadership_overview_semantic",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "summary",
+        "semantic_intent_routing"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nWhat would you like to look at for this property?\n\n- Rent-roll KPIs: occupancy, market rent, lease charges, vacancies\n- Financial detail: charge breakdowns, top balances, rent by unit type\n- Website details: amenities, EV charging, bike storage, floorplans, sources",
+          "component_types": [],
+          "source_urls": [],
+          "tool_keys": [
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_profile'], actual=['property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Compare",
+      "name": "canfield_ambiguous_compare",
+      "property_code": "115r",
+      "tags": [
+        "clarification",
+        "ambiguous"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nWhat charge view would you like?\n\n- Lease charge total for the latest month\n- Biggest charge categories\n- Charge breakdown chart\n- Rent vs lease charges comparison",
+          "component_types": [],
+          "source_urls": [],
+          "tool_keys": [
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_profile'], actual=['property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "charges",
+      "name": "canfield_ambiguous_charges",
+      "property_code": "115r",
+      "tags": [
+        "clarification",
+        "ambiguous",
+        "charges"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nI don't see matching website evidence for reviews in the selected property sample.",
+          "component_types": [],
+          "source_urls": [],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Can you provide the reviews for this property?",
+      "name": "canfield_reviews_unavailable",
+      "property_code": "115r",
+      "tags": [
+        "retrieval",
+        "reviews",
+        "negative_evidence"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nI don't see matching website evidence for that in the selected property sample.",
+          "component_types": [],
+          "source_urls": [],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Do they have package lockers?",
+      "name": "canfield_unknown_website_fact_unavailable",
+      "property_code": "115r",
+      "tags": [
+        "retrieval",
+        "negative_evidence",
+        "unknown_property_fact"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nI don't have rent-roll data for **2024** for this property, so I can't provide that year-specific breakdown.\n\nI only have rent-roll data for **2025-01-01** through **2025-12-01**.",
+          "component_types": [],
+          "source_urls": [],
+          "tool_keys": [
+            "property_profile",
+            "report_periods"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_profile', 'report_periods'], actual=['property_profile', 'report_periods']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "I want the breakdown for lease charges for the year 2024 only.",
+      "name": "canfield_2024_unavailable",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "date_guardrail"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "I could not find property code `missing-code`.",
+          "component_types": [],
+          "source_urls": [],
+          "tool_keys": []
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "What is the occupancy?",
+      "name": "unknown_property_code",
+      "property_code": "missing-code",
+      "tags": [
+        "guardrail",
+        "unknown_property"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nOccupancy stayed high over the **12-month trend window**, moving from **97.26%** in **2025-01-01** to **96.66%** in **2025-12-01** (down **0.60 percentage points**). The low point was **93.0%** in **2025-07-01**, and the high point was **97.26%** in **2025-01-01**.",
+          "component_types": [
+            "line_chart"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "occupancy_trend",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['line_chart'], actual=['line_chart']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'occupancy_trend', 'property_profile'], actual=['latest_kpis', 'occupancy_trend', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Show me the occupancy trend over time.",
+      "name": "canfield_occupancy_trend",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "trend",
+        "chart"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nOccupancy stayed high over the **12-month trend window**, moving from **97.26%** in **2025-01-01** to **96.66%** in **2025-12-01** (down **0.60 percentage points**). The low point was **93.0%** in **2025-07-01**, and the high point was **97.26%** in **2025-01-01**.",
+          "component_types": [
+            "line_chart"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "occupancy_trend",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['line_chart'], actual=['line_chart']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'occupancy_trend', 'property_profile'], actual=['latest_kpis', 'occupancy_trend', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "What changed in occupancy across the available months?",
+      "name": "canfield_occupancy_change_across_available_months",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "trend",
+        "chart",
+        "intent_routing"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nOccupancy stayed high over the **12-month trend window**, moving from **97.26%** in **2025-01-01** to **96.66%** in **2025-12-01** (down **0.60 percentage points**). The low point was **93.0%** in **2025-07-01**, and the high point was **97.26%** in **2025-01-01**.",
+          "component_types": [
+            "line_chart"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "occupancy_trend",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['line_chart'], actual=['line_chart']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'occupancy_trend', 'property_profile'], actual=['latest_kpis', 'occupancy_trend', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "How did occupancy move each month?",
+      "name": "canfield_occupancy_move_each_month_semantic",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "trend",
+        "chart",
+        "semantic_intent_routing"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nAs of **2025-12-01**, vacant units include **A105** (2-bedroom, 115mxB01), **A125** (2-bedroom, 115mxB01), **A126** (2-bedroom, 115mxB01), **A133** (2-bedroom, 115mxB01), **A141** (1-bedroom, 115mxA06), **A203** (1-bedroom, 115mxA10), **A218** (2-bedroom, 115mxB01), **A410** (1-bedroom, 115mxA12), plus 2 more.",
+          "component_types": [
+            "table"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile",
+            "vacant_units"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['table'], actual=['table']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile', 'vacant_units'], actual=['latest_kpis', 'property_profile', 'vacant_units']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Which units are vacant right now?",
+      "name": "canfield_vacant_unit_detail",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "vacancy",
+        "table"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nAs of **2025-12-01**, vacant units include **A105** (2-bedroom, 115mxB01), **A125** (2-bedroom, 115mxB01), **A126** (2-bedroom, 115mxB01), **A133** (2-bedroom, 115mxB01), **A141** (1-bedroom, 115mxA06), **A203** (1-bedroom, 115mxA10), **A218** (2-bedroom, 115mxB01), **A410** (1-bedroom, 115mxA12), plus 2 more.",
+          "component_types": [
+            "table"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile",
+            "vacant_units"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['table'], actual=['table']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile', 'vacant_units'], actual=['latest_kpis', 'property_profile', 'vacant_units']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Show vacant units and their unit types.",
+      "name": "canfield_vacant_units_with_unit_types",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "vacancy",
+        "table",
+        "intent_routing"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nAs of **2025-12-01**, vacant units include **A105** (2-bedroom, 115mxB01), **A125** (2-bedroom, 115mxB01), **A126** (2-bedroom, 115mxB01), **A133** (2-bedroom, 115mxB01), **A141** (1-bedroom, 115mxA06), **A203** (1-bedroom, 115mxA10), **A218** (2-bedroom, 115mxB01), **A410** (1-bedroom, 115mxA12), plus 2 more.",
+          "component_types": [
+            "table"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile",
+            "vacant_units"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['table'], actual=['table']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile', 'vacant_units'], actual=['latest_kpis', 'property_profile', 'vacant_units']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Open units by layout",
+      "name": "canfield_open_units_by_layout_semantic",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "vacancy",
+        "table",
+        "semantic_intent_routing"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nYes, this property has bike storage and EV charging.\n- **Community Features**: EV Charging Stations; Bike Racks & Storage Lockers",
+          "component_types": [],
+          "source_urls": [
+            "https://canfield-park.com/amenities/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://canfield-park.com/amenities/'], actual=['https://canfield-park.com/amenities/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Does this property have bike storage or EV charging? Use only data for the selected property and cite the website source.",
+      "name": "canfield_ev_bike_amenities",
+      "property_code": "115r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 1,
+              "page_type": "amenities",
+              "property_code": "115r",
+              "rank": 1,
+              "score": 0.03252247488101534,
+              "section": "Community Features",
+              "source_url": "https://canfield-park.com/amenities/",
+              "vector_rank": 2
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "1 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['115r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['amenities']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "amenities",
+        "yes_no"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nYes, this property has pet-friendly features.\n- **Community Features**: Pet Spa",
+          "component_types": [],
+          "source_urls": [
+            "https://canfield-park.com/amenities/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://canfield-park.com/amenities/'], actual=['https://canfield-park.com/amenities/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Is this property pet-friendly? Cite the website source.",
+      "name": "canfield_pet_friendly",
+      "property_code": "115r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 2,
+              "page_type": "amenities",
+              "property_code": "115r",
+              "rank": 1,
+              "score": 0.03225806451612903,
+              "section": "Community Features",
+              "source_url": "https://canfield-park.com/amenities/",
+              "vector_rank": 2
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "1 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['115r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['amenities']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "amenities",
+        "yes_no"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nYes. I found matching website evidence for this property:\n- **Community Features**: Covered Parking with Car Vacuum & Tire Calibration Station",
+          "component_types": [],
+          "source_urls": [
+            "https://canfield-park.com/amenities/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://canfield-park.com/amenities/'], actual=['https://canfield-park.com/amenities/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Does this property have covered parking? Cite the website source.",
+      "name": "canfield_covered_parking",
+      "property_code": "115r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 2,
+              "page_type": "amenities",
+              "property_code": "115r",
+              "rank": 1,
+              "score": 0.03252247488101534,
+              "section": "Community Features",
+              "source_url": "https://canfield-park.com/amenities/",
+              "vector_rank": 1
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "1 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['115r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['amenities']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "amenities",
+        "yes_no"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nI don't see matching website evidence for that in the selected property sample.",
+          "component_types": [],
+          "source_urls": [
+            "https://canfield-park.com/amenities/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Does this property have pickleball courts? Cite the website source.",
+      "name": "canfield_negative_pickleball",
+      "property_code": "115r",
+      "tags": [
+        "retrieval",
+        "negative_evidence",
+        "yes_no"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "> **Scope note:** You mentioned **The Alexander**, but the active property is **Canfield Park (`115r`)**. I\u2019ll answer using only Canfield Park data.\n\n### Canfield Park (`115r`)\n\nRelevant website evidence:\n- **Community Features**: Pool with Cabanas",
+          "component_types": [],
+          "source_urls": [
+            "https://canfield-park.com/amenities/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://canfield-park.com/amenities/'], actual=['https://canfield-park.com/amenities/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "For The Alexander, does it have a pool? Use the selected property only.",
+      "name": "canfield_active_scope_over_mentioned_property",
+      "property_code": "115r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 2,
+              "page_type": "amenities",
+              "property_code": "115r",
+              "rank": 1,
+              "score": 0.03225806451612903,
+              "section": "Community Features",
+              "source_url": "https://canfield-park.com/amenities/",
+              "vector_rank": 2
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "1 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['115r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['amenities']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "property_scope",
+        "yes_no"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nThe property website lists these amenities:\n\n**Community Features**\n- Pool with Cabanas\n- Fitness Center & Yoga Studio with Outdoor Yoga Lawn\n- Golf Simulator\n- Game Room with Shuffle Board & Poker Table\n- Roof Top Deck with BBQ Grills & Cornhole\n- Courtyard with BBQ Grills & Pizza Oven\n- Music & Art Studios\n- Co-Working Booths & Zoom Rooms\n- Community Chef's Kitchen\n- Coffee Bar & Lounge\n- Guest Suites for Guests of Residents\n- Pet Spa\n- Covered Parking with Car Vacuum & Tire Calibration Station\n- EV Charging Stations\n- Bike Racks & Storage Lockers\n- On-Site Maintenance & Management\n\n**Apartment Features**\n- Stainless Steel Appliances - Incl. Dishwasher & Microwave\n- Washer & Dryer\n- Hardwood Flooring\n- Air Conditioner\n- Large Closets\n- Keyless Access Latch App\n- Cable Ready\n- Built-In Garbage Disposal\n- Window Coverings",
+          "component_types": [],
+          "source_urls": [
+            "https://canfield-park.com/amenities/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://canfield-park.com/amenities/'], actual=['https://canfield-park.com/amenities/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "What amenities are listed on the property website?",
+      "name": "canfield_amenity_list",
+      "property_code": "115r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 1,
+              "page_type": "amenities",
+              "property_code": "115r",
+              "rank": 1,
+              "score": 0.03252247488101534,
+              "section": "Community Features",
+              "source_url": "https://canfield-park.com/amenities/",
+              "vector_rank": 2
+            },
+            {
+              "keyword_rank": null,
+              "page_type": "amenities",
+              "property_code": "115r",
+              "rank": 2,
+              "score": 0.01639344262295082,
+              "section": "Apartment Features",
+              "source_url": "https://canfield-park.com/amenities/",
+              "vector_rank": 1
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "2 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['115r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['amenities']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "amenities",
+        "list_answer"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nThe property website lists these amenities:\n\n**Apartment Features**\n- Stainless Steel Appliances - Incl. Dishwasher & Microwave\n- Washer & Dryer\n- Hardwood Flooring\n- Air Conditioner\n- Large Closets\n- Keyless Access Latch App\n- Cable Ready\n- Built-In Garbage Disposal\n- Window Coverings",
+          "component_types": [],
+          "source_urls": [
+            "https://canfield-park.com/amenities/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://canfield-park.com/amenities/'], actual=['https://canfield-park.com/amenities/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "What apartment features are listed on the website?",
+      "name": "canfield_apartment_features",
+      "property_code": "115r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 2,
+              "page_type": "amenities",
+              "property_code": "115r",
+              "rank": 1,
+              "score": 0.03252247488101534,
+              "section": "Apartment Features",
+              "source_url": "https://canfield-park.com/amenities/",
+              "vector_rank": 1
+            },
+            {
+              "keyword_rank": 1,
+              "page_type": "amenities",
+              "property_code": "115r",
+              "rank": 2,
+              "score": 0.03252247488101534,
+              "section": "Community Features",
+              "source_url": "https://canfield-park.com/amenities/",
+              "vector_rank": 2
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "2 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['115r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['amenities']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "amenities",
+        "list_answer"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nYes. I found matching website evidence for this property:\n- **Apartment Features**: Washer & Dryer",
+          "component_types": [],
+          "source_urls": [
+            "https://canfield-park.com/amenities/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://canfield-park.com/amenities/'], actual=['https://canfield-park.com/amenities/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Do units include washer and dryer? Cite the website source.",
+      "name": "canfield_washer_dryer",
+      "property_code": "115r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 1,
+              "page_type": "amenities",
+              "property_code": "115r",
+              "rank": 1,
+              "score": 0.03278688524590164,
+              "section": "Apartment Features",
+              "source_url": "https://canfield-park.com/amenities/",
+              "vector_rank": 1
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "1 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['115r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['amenities']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "amenities",
+        "yes_no"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nRelevant website evidence:\n- **Page Overview**: Your Apartment Your Community Your Neighborhood",
+          "component_types": [],
+          "source_urls": [
+            "https://canfield-park.com/gallery/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://canfield-park.com/gallery/'], actual=['https://canfield-park.com/gallery/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Show photos from the gallery for this property and cite the source.",
+      "name": "canfield_gallery_photos",
+      "property_code": "115r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 2,
+              "page_type": "gallery",
+              "property_code": "115r",
+              "rank": 1,
+              "score": 0.03252247488101534,
+              "section": "Page Overview",
+              "source_url": "https://canfield-park.com/gallery/",
+              "vector_rank": 1
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "1 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['115r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['gallery']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "gallery"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nThe property address is **306 Canfield Avenue, Bridgeport, CT 06605**.\n\nSource: [Canfield Park website](https://canfield-park.com/)",
+          "component_types": [],
+          "source_urls": [],
+          "tool_keys": [
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_profile'], actual=['property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Where is this property located?",
+      "name": "canfield_location_only",
+      "property_code": "115r",
+      "tags": [
+        "profile",
+        "location"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nThe property address is **306 Canfield Avenue, Bridgeport, CT 06605**. I don't have a clean neighborhood summary in the scraped website sample.\n\nSource: [Canfield Park website](https://canfield-park.com/)",
+          "component_types": [],
+          "source_urls": [],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Where is this property located and what neighborhood context does the website mention?",
+      "name": "canfield_location_context",
+      "property_code": "115r",
+      "tags": [
+        "retrieval",
+        "location",
+        "fallback"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nThe website advertises these floorplan categories:\n- Studio\n- 1-bedroom\n- 2-bedroom\n\nI also found these individual floorplan pages:\n- **A07**: 1 bed, 1 bath, 770 sq. ft.\n- **A10**: 1 bed, 1 bath, Den, 825 sq. ft.\n- **A04**: 1 bed, 1 bath, Den, 748 sq. ft.\n- **A06**: 1 bed, 1 bath, 770 sq. ft., $2,358 /mo*\n- **A11**: 1 bed, 1 bath, Den, 825 - 852 sq. ft.\n- **A08**: 1 bed, 1 bath, 799 sq. ft.\n- **A12**: 1 bed, 1 bath, 882 sq. ft.\n- **A09**: 1 bed, 1 bath, 805 sq. ft.\n- **A05**: 1 bed, 1 bath, 747 - 755 sq. ft., $2,498 /mo*\n- **A03**: 1 bed, 1 bath, 739 sq. ft., $2,547 /mo*",
+          "component_types": [],
+          "source_urls": [
+            "https://canfield-park.com/floorplans/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://canfield-park.com/floorplans/'], actual=['https://canfield-park.com/floorplans/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "What floorplans are advertised on the website?",
+      "name": "canfield_floorplans",
+      "property_code": "115r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 1,
+              "page_type": "floorplans",
+              "property_code": "115r",
+              "rank": 1,
+              "score": 0.03177805800756621,
+              "section": "A07",
+              "source_url": "https://canfield-park.com/floorplans/a07/",
+              "vector_rank": 5
+            },
+            {
+              "keyword_rank": 6,
+              "page_type": "floorplans",
+              "property_code": "115r",
+              "rank": 2,
+              "score": 0.031024531024531024,
+              "section": "A10",
+              "source_url": "https://canfield-park.com/floorplans/a10/",
+              "vector_rank": 3
+            },
+            {
+              "keyword_rank": 5,
+              "page_type": "floorplans",
+              "property_code": "115r",
+              "rank": 3,
+              "score": 0.030536130536130537,
+              "section": "A04",
+              "source_url": "https://canfield-park.com/floorplans/a04/",
+              "vector_rank": 6
+            },
+            {
+              "keyword_rank": 10,
+              "page_type": "floorplans",
+              "property_code": "115r",
+              "rank": 4,
+              "score": 0.0304147465437788,
+              "section": "A06",
+              "source_url": "https://canfield-park.com/floorplans/a06/",
+              "vector_rank": 2
+            },
+            {
+              "keyword_rank": 12,
+              "page_type": "floorplans",
+              "property_code": "115r",
+              "rank": 5,
+              "score": 0.03028233151183971,
+              "section": "A11",
+              "source_url": "https://canfield-park.com/floorplans/a11/",
+              "vector_rank": 1
+            },
+            {
+              "keyword_rank": 2,
+              "page_type": "floorplans",
+              "property_code": "115r",
+              "rank": 6,
+              "score": 0.03021353930031804,
+              "section": "A08",
+              "source_url": "https://canfield-park.com/floorplans/a08/",
+              "vector_rank": 11
+            },
+            {
+              "keyword_rank": 4,
+              "page_type": "floorplans",
+              "property_code": "115r",
+              "rank": 7,
+              "score": 0.030117753623188408,
+              "section": "A12",
+              "source_url": "https://canfield-park.com/floorplans/a12/",
+              "vector_rank": 9
+            },
+            {
+              "keyword_rank": 3,
+              "page_type": "floorplans",
+              "property_code": "115r",
+              "rank": 8,
+              "score": 0.02976190476190476,
+              "section": "A09",
+              "source_url": "https://canfield-park.com/floorplans/a09/",
+              "vector_rank": 12
+            },
+            {
+              "keyword_rank": 11,
+              "page_type": "floorplans",
+              "property_code": "115r",
+              "rank": 9,
+              "score": 0.029709507042253523,
+              "section": "A05",
+              "source_url": "https://canfield-park.com/floorplans/a05/",
+              "vector_rank": 4
+            },
+            {
+              "keyword_rank": 9,
+              "page_type": "floorplans",
+              "property_code": "115r",
+              "rank": 10,
+              "score": 0.029418126757516764,
+              "section": "A03",
+              "source_url": "https://canfield-park.com/floorplans/a03/",
+              "vector_rank": 7
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "10 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['115r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['floorplans']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "floorplans",
+        "source_compaction"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nFor **2025-12-01**, the largest charge categories are **RENT** ($761,929), **PARKING** ($28,490), **AMENITY** ($11,745). The displayed top categories sum to **$804,981**.",
+          "component_types": [
+            "bar_chart"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "charge_breakdown",
+            "latest_kpis",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['bar_chart'], actual=['bar_chart']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['charge_breakdown', 'latest_kpis', 'property_profile'], actual=['charge_breakdown', 'latest_kpis', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "What are the biggest charge categories for this property?",
+      "name": "canfield_charge_breakdown",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "chart"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nFor **2025-12-01**, the largest charge categories are **RENT** ($761,929), **PARKING** ($28,490), **AMENITY** ($11,745). The displayed top categories sum to **$804,981**.",
+          "component_types": [
+            "bar_chart"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "charge_breakdown",
+            "latest_kpis",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['bar_chart'], actual=['bar_chart']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['charge_breakdown', 'latest_kpis', 'property_profile'], actual=['charge_breakdown', 'latest_kpis', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Show the largest income buckets.",
+      "name": "canfield_income_buckets_semantic",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "chart",
+        "semantic_intent_routing"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nFor **2025-12-01**, market rent is **$741,209** and lease charges are **$804,981**. Lease charges are **$63,772** higher than market rent (**8.6%** difference).",
+          "component_types": [
+            "comparison_view"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile",
+            "rent_lease_comparison"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['comparison_view'], actual=['comparison_view']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile', 'rent_lease_comparison'], actual=['latest_kpis', 'property_profile', 'rent_lease_comparison']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Compare rent and lease charges for the latest month.",
+      "name": "canfield_rent_lease_latest_month_comparison",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "comparison",
+        "intent_routing"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nFor **2025-12-01**, market rent is **$741,209** and lease charges are **$804,981**. Lease charges are **$63,772** higher than market rent (**8.6%** difference).",
+          "component_types": [
+            "comparison_view"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile",
+            "rent_lease_comparison"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['comparison_view'], actual=['comparison_view']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile', 'rent_lease_comparison'], actual=['latest_kpis', 'property_profile', 'rent_lease_comparison']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Market rent against lease charges",
+      "name": "canfield_market_rent_against_lease_semantic",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "comparison",
+        "semantic_intent_routing"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nFor **2025-12-01**, market rent is **$741,209** and lease charges are **$804,981**. Lease charges are **$63,772** higher than market rent (**8.6%** difference).",
+          "component_types": [
+            "comparison_view"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile",
+            "rent_lease_comparison"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['comparison_view'], actual=['comparison_view']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile', 'rent_lease_comparison'], actual=['latest_kpis', 'property_profile', 'rent_lease_comparison']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Rent vs lease charges comparison",
+      "name": "canfield_rent_vs_lease_charges_followup",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "comparison",
+        "followup_label",
+        "intent_routing"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Canfield Park (`115r`)\n\nUsing the recognizable floorplan-code pattern, the broader bedroom category averages are **Studio** at $2,100, **1-bedroom** at $2,361, **2-bedroom** at $2,744. For the detailed floorplan/unit-type codes, average market rent ranges from **$1,902** (**115mxS01**) to **$2,850** (**115mxB04**). The top average rents are **115mxB04** at $2,850, **115mxA15** at $2,786, **115mxB01** at $2,745.",
+          "component_types": [
+            "bar_chart"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile",
+            "rent_by_bedroom_category",
+            "rent_by_unit_type"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['bar_chart'], actual=['bar_chart']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile', 'rent_by_bedroom_category', 'rent_by_unit_type'], actual=['latest_kpis', 'property_profile', 'rent_by_bedroom_category', 'rent_by_unit_type']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Compare average market rent by unit type.",
+      "name": "canfield_rent_by_unit_type",
+      "property_code": "115r",
+      "tags": [
+        "structured",
+        "chart"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Luckey Platt (`183r`)\n\nAs of **2025-12-01**, occupancy is **100.0%** across **105 units**. Market rent is **$206,215** and lease charges are **$0.00**. The latest summary shows **0 vacant units**.\n\nAs of **2025-12-01**, the highest resident balances are **unit 506** at $0.00, **unit 427A** at $0.00, **unit 501** at $0.00.",
+          "component_types": [
+            "kpi_card",
+            "table"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile",
+            "top_balances"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['kpi_card', 'table'], actual=['kpi_card', 'table']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile', 'top_balances'], actual=['latest_kpis', 'property_profile', 'top_balances']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Show latest occupancy and top balance units.",
+      "name": "luckey_combined_kpi_and_balances",
+      "property_code": "183r",
+      "tags": [
+        "structured",
+        "combined",
+        "table"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### Luckey Platt (`183r`)\n\nAs of **2025-12-01**, the highest resident balances are **unit 506** at $0.00, **unit 427A** at $0.00, **unit 501** at $0.00.",
+          "component_types": [
+            "table"
+          ],
+          "source_urls": [],
+          "tool_keys": [
+            "latest_kpis",
+            "property_profile",
+            "top_balances"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=['table'], actual=['table']",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['latest_kpis', 'property_profile', 'top_balances'], actual=['latest_kpis', 'property_profile', 'top_balances']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "max=0, actual=0",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "Which units have the highest balances?",
+      "name": "luckey_top_balances",
+      "property_code": "183r",
+      "tags": [
+        "structured",
+        "table"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### The Alexander (`176r`)\n\nThe property website lists these amenities:\n\n**Brand New Amenities**\n- 24-Hour Fitness Center with Fitness Classes\n- Indoor & Outdoor Swimming Pools\n- Community Lounge & Billiard Lounge\n- Children's Playroom\n- Business Center\n- Movie Theater\n- Pet Spa\n- Outdoor Courtyards with Hammocks\n- BBQ Grills & Fire Pits\n- Online Payments & Work Orders\n- EV Charging Stations\n- *Available in select units",
+          "component_types": [],
+          "source_urls": [
+            "https://alexanderalbany.com/amenities/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "actual=['176r']",
+            "name": "source_property_scope",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "What amenities mention pool or fitness?",
+      "name": "alexander_pool_fitness",
+      "property_code": "176r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 1,
+              "page_type": "amenities",
+              "property_code": "176r",
+              "rank": 1,
+              "score": 0.03278688524590164,
+              "section": "Brand New Amenities",
+              "source_url": "https://alexanderalbany.com/amenities/",
+              "vector_rank": 1
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "1 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['176r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['amenities']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "amenities"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### The Alexander (`176r`)\n\nThe website advertises these floorplan categories:\n- 1-bedroom\n- 2-bedroom\n- 3-bedroom\n\nI also found these individual floorplan pages:\n- **A03**: 1 bed, 1 bath, 807 sq. ft.\n- **A01**: 1 bed, 1 bath, 635 sq. ft.\n- **B02**: 2 bed, 2 bath, 1124 sq. ft.",
+          "component_types": [],
+          "source_urls": [
+            "https://alexanderalbany.com/floorplans/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://alexanderalbany.com/floorplans/'], actual=['https://alexanderalbany.com/floorplans/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "What floorplans are advertised on the website?",
+      "name": "alexander_floorplans_cross_property",
+      "property_code": "176r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 2,
+              "page_type": "floorplans",
+              "property_code": "176r",
+              "rank": 1,
+              "score": 0.028949545078577336,
+              "section": "Page Overview",
+              "source_url": "https://alexanderalbany.com/floorplans/a01/",
+              "vector_rank": 18
+            },
+            {
+              "keyword_rank": 10,
+              "page_type": "floorplans",
+              "property_code": "176r",
+              "rank": 2,
+              "score": 0.02877846790890269,
+              "section": "Follow Us on Instagram",
+              "source_url": "https://alexanderalbany.com/floorplans/",
+              "vector_rank": 9
+            },
+            {
+              "keyword_rank": 3,
+              "page_type": "floorplans",
+              "property_code": "176r",
+              "rank": 3,
+              "score": 0.028531243721117136,
+              "section": "Page Overview",
+              "source_url": "https://alexanderalbany.com/floorplans/a02/",
+              "vector_rank": 19
+            },
+            {
+              "keyword_rank": 11,
+              "page_type": "floorplans",
+              "property_code": "176r",
+              "rank": 4,
+              "score": 0.028370221327967807,
+              "section": "Follow Us on Instagram",
+              "source_url": "https://alexanderalbany.com/floorplans/a01/",
+              "vector_rank": 10
+            },
+            {
+              "keyword_rank": 23,
+              "page_type": "floorplans",
+              "property_code": "176r",
+              "rank": 5,
+              "score": 0.028177225029148854,
+              "section": "A03",
+              "source_url": "https://alexanderalbany.com/floorplans/a03/",
+              "vector_rank": 2
+            },
+            {
+              "keyword_rank": 25,
+              "page_type": "floorplans",
+              "property_code": "176r",
+              "rank": 6,
+              "score": 0.02815814850530376,
+              "section": "A01",
+              "source_url": "https://alexanderalbany.com/floorplans/a01/",
+              "vector_rank": 1
+            },
+            {
+              "keyword_rank": 4,
+              "page_type": "floorplans",
+              "property_code": "176r",
+              "rank": 7,
+              "score": 0.028125,
+              "section": "Page Overview",
+              "source_url": "https://alexanderalbany.com/floorplans/a03/",
+              "vector_rank": 20
+            },
+            {
+              "keyword_rank": 1,
+              "page_type": "floorplans",
+              "property_code": "176r",
+              "rank": 8,
+              "score": 0.028021349599695006,
+              "section": "Page Overview",
+              "source_url": "https://alexanderalbany.com/floorplans/",
+              "vector_rank": 26
+            },
+            {
+              "keyword_rank": 12,
+              "page_type": "floorplans",
+              "property_code": "176r",
+              "rank": 9,
+              "score": 0.02797339593114241,
+              "section": "Follow Us on Instagram",
+              "source_url": "https://alexanderalbany.com/floorplans/a02/",
+              "vector_rank": 11
+            },
+            {
+              "keyword_rank": 24,
+              "page_type": "floorplans",
+              "property_code": "176r",
+              "rank": 10,
+              "score": 0.027777777777777776,
+              "section": "B02",
+              "source_url": "https://alexanderalbany.com/floorplans/b02/",
+              "vector_rank": 3
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "10 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['176r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['floorplans']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "floorplans",
+        "property_scope"
+      ]
+    },
+    {
+      "generation": {
+        "artifact": {
+          "answer_markdown": "### The Halden (`126r`)\n\nThe website advertises these floorplan categories:\n- 1-bedroom\n- 2-bedroom\n- 3-bedroom\n\nI also found these individual floorplan pages:\n- **A2**: 1 bed, 1 bath, 694 - 741 sq. ft.\n- **A5**: 1 bed, 1 bath, 838 sq. ft.\n- **A3**: 1 bed, 1 bath, 745 sq. ft.\n- **A1**: 1 bed, 1 bath, 630 sq. ft.\n- **A8D**: 1 bed, 1 bath, Den, 909 sq. ft.\n- **B3**: 2 bed, 2 bath, 1132 sq. ft.\n- **A4**: 1 bed, 1 bath, 808 - 817 sq. ft.\n- **B1**: 2 bed, 2 bath, 981 sq. ft.\n- **A9D**: 1 bed, 1 bath, Den, 1023 sq. ft.\n- **A7D**: 1 bed, 1 bath, Den, 889 sq. ft.",
+          "component_types": [],
+          "source_urls": [
+            "https://thehalden.com/floorplans/"
+          ],
+          "tool_keys": [
+            "property_content",
+            "property_profile"
+          ]
+        },
+        "checks": [
+          {
+            "details": "missing=[]",
+            "name": "answer_required_terms",
+            "passed": true
+          },
+          {
+            "details": "present=[]",
+            "name": "answer_forbidden_terms",
+            "passed": true
+          },
+          {
+            "details": "expected=[], actual=[]",
+            "name": "component_types",
+            "passed": true
+          },
+          {
+            "details": "expected=['property_content', 'property_profile'], actual=['property_content', 'property_profile']",
+            "name": "tool_keys",
+            "passed": true
+          },
+          {
+            "details": "expected=['https://thehalden.com/floorplans/'], actual=['https://thehalden.com/floorplans/']",
+            "name": "source_urls",
+            "passed": true
+          },
+          {
+            "details": "max=1, actual=1",
+            "name": "source_count",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "message": "What floorplans are advertised on the website?",
+      "name": "halden_floorplans",
+      "property_code": "126r",
+      "retrieval": {
+        "artifact": {
+          "top_results": [
+            {
+              "keyword_rank": 5,
+              "page_type": "floorplans",
+              "property_code": "126r",
+              "rank": 1,
+              "score": 0.03177805800756621,
+              "section": "A2",
+              "source_url": "https://thehalden.com/floorplans/a2/",
+              "vector_rank": 1
+            },
+            {
+              "keyword_rank": 6,
+              "page_type": "floorplans",
+              "property_code": "126r",
+              "rank": 2,
+              "score": 0.03128054740957967,
+              "section": "A5",
+              "source_url": "https://thehalden.com/floorplans/a5/",
+              "vector_rank": 2
+            },
+            {
+              "keyword_rank": 2,
+              "page_type": "floorplans",
+              "property_code": "126r",
+              "rank": 3,
+              "score": 0.03128054740957967,
+              "section": "A3",
+              "source_url": "https://thehalden.com/floorplans/a3/",
+              "vector_rank": 6
+            },
+            {
+              "keyword_rank": 1,
+              "page_type": "floorplans",
+              "property_code": "126r",
+              "rank": 4,
+              "score": 0.031099324975891997,
+              "section": "A1",
+              "source_url": "https://thehalden.com/floorplans/a1/",
+              "vector_rank": 8
+            },
+            {
+              "keyword_rank": 4,
+              "page_type": "floorplans",
+              "property_code": "126r",
+              "rank": 5,
+              "score": 0.031009615384615385,
+              "section": "A8D",
+              "source_url": "https://thehalden.com/floorplans/a8d/",
+              "vector_rank": 5
+            },
+            {
+              "keyword_rank": 7,
+              "page_type": "floorplans",
+              "property_code": "126r",
+              "rank": 6,
+              "score": 0.03055037313432836,
+              "section": "B3",
+              "source_url": "https://thehalden.com/floorplans/b3/",
+              "vector_rank": 4
+            },
+            {
+              "keyword_rank": 10,
+              "page_type": "floorplans",
+              "property_code": "126r",
+              "rank": 7,
+              "score": 0.030158730158730156,
+              "section": "A4",
+              "source_url": "https://thehalden.com/floorplans/a4/",
+              "vector_rank": 3
+            },
+            {
+              "keyword_rank": 3,
+              "page_type": "floorplans",
+              "property_code": "126r",
+              "rank": 8,
+              "score": 0.029957522915269395,
+              "section": "B1",
+              "source_url": "https://thehalden.com/floorplans/b1/",
+              "vector_rank": 11
+            },
+            {
+              "keyword_rank": 9,
+              "page_type": "floorplans",
+              "property_code": "126r",
+              "rank": 9,
+              "score": 0.029418126757516764,
+              "section": "A9D",
+              "source_url": "https://thehalden.com/floorplans/a9d/",
+              "vector_rank": 7
+            },
+            {
+              "keyword_rank": 8,
+              "page_type": "floorplans",
+              "property_code": "126r",
+              "rank": 10,
+              "score": 0.02919863597612958,
+              "section": "A7D",
+              "source_url": "https://thehalden.com/floorplans/a7d/",
+              "vector_rank": 9
+            }
+          ]
+        },
+        "checks": [
+          {
+            "details": "10 result(s)",
+            "name": "has_results",
+            "passed": true
+          },
+          {
+            "details": "property_codes=['126r']",
+            "name": "property_scope",
+            "passed": true
+          },
+          {
+            "details": "page_types=['floorplans']",
+            "name": "page_type",
+            "passed": true
+          },
+          {
+            "details": "missing=[]",
+            "name": "required_terms",
+            "passed": true
+          },
+          {
+            "details": "requires at least one vector-ranked and one keyword-ranked result",
+            "name": "hybrid_signal",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      "tags": [
+        "retrieval",
+        "floorplans",
+        "property_scope"
+      ]
+    }
+  ],
+  "generation": {
+    "pass_rate": 1.0,
+    "passed": 38,
+    "total": 38
+  },
+  "model": "mock:mock-property-assistant",
+  "retrieval": {
+    "pass_rate": 1.0,
+    "passed": 12,
+    "total": 12
+  }
+}
