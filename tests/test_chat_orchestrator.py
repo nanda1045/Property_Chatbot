@@ -530,6 +530,44 @@ def test_rent_by_unit_type_explains_bedroom_categories_and_floorplan_codes(
 
 
 @pytest.mark.parametrize(
+    "message",
+    [
+        "What is the average balance by bedroom category for this property?",
+        "Which bedroom category has the highest vacancy rate?",
+        "Show median lease charges by unit type.",
+    ],
+)
+def test_unsupported_structured_aggregates_do_not_use_partial_tool_results(
+    mysql_db,
+    hybrid_retriever,
+    message: str,
+) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat",
+        json={
+            "property_code": "115r",
+            "model": "mock:mock-property-assistant",
+            "message": message,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    answer = body["answer_markdown"]
+
+    assert "don't have a reliable full-property tool" in answer
+    assert "won't calculate it from partial rows" in answer
+    assert body["components"] == []
+    assert body["sources"] == []
+    assert set(body["tool_results"]) == {"property_profile"}
+    assert "top_balances" not in body["tool_results"]
+    assert "vacant_units" not in body["tool_results"]
+    assert "charge_breakdown" not in body["tool_results"]
+
+
+@pytest.mark.parametrize(
     ("message", "expected_component_type", "expected_tool_key", "expected_answer_term"),
     [
         (

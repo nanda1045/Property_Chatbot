@@ -325,6 +325,25 @@ class LangChainOrchestrator:
                 )
 
         if wants_structured:
+            unsupported_metric = self._unsupported_structured_aggregate(message, intent)
+            if unsupported_metric:
+                return ChatResponse(
+                    property_code=normalized_code,
+                    model=model,
+                    answer_markdown=self._with_scope_note(
+                        self._unsupported_structured_metric_answer(
+                            profile=profile,
+                            property_code=normalized_code,
+                            unsupported_metric=unsupported_metric,
+                        ),
+                        scope_note,
+                    ),
+                    components=[],
+                    sources=[],
+                    tool_results=tool_results,
+                )
+
+        if wants_structured:
             self._collect_structured(
                 property_code=normalized_code,
                 message=message,
@@ -1276,6 +1295,137 @@ class LangChainOrchestrator:
         )
 
     @staticmethod
+    def _unsupported_structured_aggregate(
+        message: str,
+        intent: str | None = None,
+    ) -> str | None:
+        text = message.lower()
+
+        if "median" in text and any(
+            term in text
+            for term in [
+                "balance",
+                "balances",
+                "charge",
+                "charges",
+                "fee",
+                "fees",
+                "lease",
+                "market rent",
+                "rent",
+                "vacancy",
+                "occupancy",
+            ]
+        ):
+            return "median structured aggregates"
+
+        # Supported aggregate-style views must pass through before the broad guard.
+        if (
+            LangChainOrchestrator._wants_rent_by_unit_type(text, intent)
+            and ("market rent" in text or "average rent" in text or "avg rent" in text)
+            and "lease charge" not in text
+            and "lease charges" not in text
+        ):
+            return None
+        if LangChainOrchestrator._wants_charge_breakdown(text, intent):
+            return None
+        if LangChainOrchestrator._wants_occupancy_trend(text, intent):
+            return None
+        if LangChainOrchestrator._wants_rent_lease_comparison(text, intent):
+            return None
+        if LangChainOrchestrator._wants_vacant_unit_detail(text, intent):
+            return None
+
+        if any(
+            phrase in text
+            for phrase in [
+                "latest occupancy",
+                "latest kpi",
+                "latest market rent",
+                "latest lease charge",
+                "latest vacant",
+                "current occupancy",
+                "current market rent",
+                "current lease charge",
+                "current vacant",
+            ]
+        ):
+            return None
+
+        structured_metric_terms = [
+            "balance",
+            "balances",
+            "delinquency",
+            "delinquent",
+            "vacancy",
+            "vacant",
+            "lease charge",
+            "lease charges",
+            "charge",
+            "charges",
+            "fee",
+            "fees",
+            "market rent",
+            "rent",
+            "occupancy",
+        ]
+        aggregate_terms = [
+            "average",
+            "avg",
+            "mean",
+            "median",
+            "rate",
+            "ratio",
+            "per ",
+            " by ",
+            "group by",
+            "grouped",
+            "bucket",
+            "buckets",
+            "distribution",
+        ]
+        grouping_terms = [
+            "bedroom",
+            "category",
+            "categories",
+            "layout",
+            "floorplan",
+            "floor plan",
+            "unit type",
+            "resident status",
+            "sqft",
+            "square feet",
+        ]
+
+        has_metric = any(term in text for term in structured_metric_terms)
+        has_aggregate = any(term in text for term in aggregate_terms)
+        has_grouping = any(term in text for term in grouping_terms)
+
+        if not has_metric or not has_aggregate:
+            return None
+
+        if "balance" in text or "balances" in text or "delinquen" in text:
+            if any(term in text for term in ["top", "highest", "largest", "biggest"]):
+                return None
+            if has_grouping or any(term in text for term in ["average", "avg", "mean", "median"]):
+                return "balance aggregates by category"
+
+        if ("vacancy" in text or "vacant" in text) and any(
+            term in text for term in ["rate", "average", "avg", " by ", "per ", "group"]
+        ):
+            return "vacancy aggregates by category"
+
+        if ("lease charge" in text or "charge" in text or "fee" in text) and has_grouping:
+            return "charge aggregates by category"
+
+        if ("rent" in text or "occupancy" in text) and any(
+            term in text for term in ["median", "rate", "ratio"]
+        ):
+            return "unsupported structured aggregate"
+
+        return None
+
+    @staticmethod
     def _wants_amenity_list(text: str, intent: str | None = None) -> bool:
         return (
             intent == "amenity_list"
@@ -1431,6 +1581,21 @@ class LangChainOrchestrator:
             f"**{self._format_money(comparison['lease_charges'])}**. Lease charges are "
             f"**{self._format_money(abs(difference))}** {direction} market rent "
             f"(**{abs(comparison['percent_difference']):.1f}%** difference)."
+        )
+
+    @staticmethod
+    def _unsupported_structured_metric_answer(
+        profile: dict,
+        property_code: str,
+        unsupported_metric: str,
+    ) -> str:
+        return (
+            f"### {profile['property_name']} (`{property_code}`)\n\n"
+            f"I don't have a reliable full-property tool for **{unsupported_metric}** yet, "
+            "so I won't calculate it from partial rows.\n\n"
+            "I can help with supported views like latest KPIs, occupancy trend, charge "
+            "breakdown, top balances, vacant units, rent vs lease charges, and average "
+            "market rent by unit type."
         )
 
     def _occupancy_trend_summary(self, rows: list[dict]) -> str:
