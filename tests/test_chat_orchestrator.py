@@ -535,6 +535,7 @@ def test_rent_by_unit_type_explains_bedroom_categories_and_floorplan_codes(
         "What is the average balance by bedroom category for this property?",
         "Which bedroom category has the highest vacancy rate?",
         "Show median lease charges by unit type.",
+        "Give me the top 10 market rents for this property.",
     ],
 )
 def test_unsupported_structured_aggregates_do_not_use_partial_tool_results(
@@ -558,13 +559,14 @@ def test_unsupported_structured_aggregates_do_not_use_partial_tool_results(
     answer = body["answer_markdown"]
 
     assert "can't calculate" in answer
-    assert "won't derive it from partial rows" in answer
+    assert "partial rows" not in answer
     assert body["components"] == []
     assert body["sources"] == []
     assert set(body["tool_results"]) == {"property_profile"}
     assert "top_balances" not in body["tool_results"]
     assert "vacant_units" not in body["tool_results"]
     assert "charge_breakdown" not in body["tool_results"]
+    assert "latest_kpis" not in body["tool_results"]
 
 
 @pytest.mark.parametrize(

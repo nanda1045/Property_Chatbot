@@ -199,14 +199,15 @@ flowchart LR
    - deterministic rules for high-risk or common cases,
    - local semantic routing for paraphrases,
    - optional LLM fallback only when using a real LLM and local routing is uncertain.
-4. The orchestrator calls only the tools needed for the routed intent.
-5. Every structured SQL query is filtered by active `property_code`.
-6. Every retrieval query is filtered by active `property_code` metadata.
-7. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
-8. Retrieved chunks are annotated with evidence confidence before being passed to the LLM.
-9. The LLM receives scoped tool results, retrieval evidence, component JSON, and guardrails.
-10. The API returns Markdown, sources, tool results, and structured UI component definitions.
-11. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, and source links.
+4. For structured analytics, the orchestrator checks a metric capability registry before tool execution.
+5. Supported metrics are routed to bounded tools; unsupported aggregate metrics return a clear limitation instead of using partial rows.
+6. Every structured SQL query is filtered by active `property_code`.
+7. Every retrieval query is filtered by active `property_code` metadata.
+8. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
+9. Retrieved chunks are annotated with evidence confidence before being passed to the LLM.
+10. The LLM receives scoped tool results, retrieval evidence, component JSON, and guardrails.
+11. The API returns Markdown, sources, tool results, and structured UI component definitions.
+12. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, and source links.
 
 ## Design Decisions
 
@@ -217,6 +218,8 @@ The public website content is treated as unstructured data and ingested into a r
 Hybrid retrieval was chosen over vector-only retrieval because property websites contain exact terms such as `EV charging`, `A07`, `bike storage`, and charge/floorplan labels. BM25 helps exact-match queries, while Chroma handles paraphrases. Reciprocal rank fusion combines both without adding a heavy search dependency.
 
 The orchestrator does not let the LLM freely choose arbitrary tools. Instead, the backend routes intent and calls bounded tools itself. This keeps property scoping enforceable end-to-end and makes responses more predictable during a demo.
+
+Structured analytics also pass through a lightweight capability registry. The registry documents which metric families are supported by complete, validated tools, such as latest KPIs, occupancy trend, top balances, vacant units, charge breakdown, and average market rent by unit type. If a user asks for an unsupported aggregate, such as average balance by bedroom category or median lease charges by unit type, the assistant does not compute it from a related partial result. It returns a limitation message and suggests supported views.
 
 The LLM is used for natural-language synthesis, not as the source of truth. Numeric facts come from MySQL tools, website facts come from retrieved chunks, and UI components are generated from structured tool outputs.
 
@@ -245,6 +248,7 @@ Examples the assistant is designed to handle:
 - top balances
 - vacant units and bedroom categories
 - average market rent by bedroom category and floorplan code
+- unsupported structured aggregates, such as average balance by bedroom category, are detected and answered with a limitation rather than partial calculations
 - website amenities and apartment features
 - EV charging, bike storage, parking, and other website-supported facts
 - floorplans advertised on the website
@@ -292,9 +296,8 @@ Evaluation coverage includes:
 - The provided rent-roll Excel files are the source of truth for structured property facts.
 - The available structured data currently covers the loaded report months only.
 - Public property websites are acceptable sources for unstructured content.
-- A representative sample of website content is sufficient for the take-home prototype.
 - The user selects one active property at runtime, and answers should stay scoped to that property.
-- Local sentence-transformer embeddings are acceptable to avoid paid embedding APIs.
+
 
 ## Tradeoffs
 
@@ -303,7 +306,7 @@ Evaluation coverage includes:
 - The included local retrieval indexes make demos faster, but they can also be rebuilt from source data.
 - Intent routing uses local rules and embeddings for reliability. This is more predictable than fully agentic tool calling, but it means new query families may require adding examples or rules.
 - The LLM is not given unrestricted tool access. This reduces risk but makes the orchestration layer more explicit.
-- Structured analytics use curated SQL-backed tools rather than free-form LLM-generated SQL. This improves safety, testability, and property scoping, but unsupported metrics require adding a new repository method/tool or a future validated metric catalog.
+- Structured analytics use curated SQL-backed tools and a lightweight capability registry rather than free-form LLM-generated SQL. This improves safety, testability, and property scoping, but unsupported metrics require adding a new repository method/tool or evolving the registry into a fuller metric catalog.
 - The frontend renders a curated set of UI components rather than arbitrary LLM-generated HTML, which is safer but less flexible.
 
 ## Limitations
@@ -315,7 +318,8 @@ Evaluation coverage includes:
 - The prototype is designed for local development, not production deployment.
 - There is no authentication or multi-user authorization layer.
 - MySQL must be running and loaded before structured-data questions will work.
-- The assistant does not answer arbitrary database metrics automatically. It currently supports the implemented rent-roll analytics tools; questions outside those tools should be clarified or reported as unsupported rather than answered with generated SQL.
+- The assistant does not answer arbitrary database metrics automatically. It currently supports the implemented rent-roll analytics tools and rejects unsupported aggregate-style metrics rather than answering with generated SQL or partial table results.
+- The capability registry catches common unsupported aggregate patterns, but it is not a complete natural-language SQL planner. New metric families such as renewal trends, bad debt percentage, lease expirations, or move-in/move-out analytics would need new catalog entries and validated queries.
 - If retrieval indexes are deleted, run `scripts/ingest_unstructured.py` again before testing website questions.
 
 ## Packaging Notes

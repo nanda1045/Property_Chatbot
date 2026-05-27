@@ -240,6 +240,13 @@ UNSUPPORTED_STRUCTURED_AGGREGATE_RULES = (
         "grouping_terms": (),
         "allowed_terms": (),
     },
+    {
+        "label": "top market rents by unit",
+        "metric_terms": ("market rent", "market rents", "rent", "rents"),
+        "aggregate_terms": ("top", "highest", "largest"),
+        "grouping_terms": (),
+        "allowed_terms": (),
+    },
 )
 ANSWER_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9'-]{1,}", re.IGNORECASE)
 YEAR_RE = re.compile(r"\b(20\d{2})\b")
@@ -538,9 +545,6 @@ class LangChainOrchestrator:
                         tool_results=tool_results,
                     )
 
-        if on_token and scope_note:
-            on_token(f"{scope_note}\n\n")
-
         answer_markdown = self._generate_answer(
             model=model,
             property_code=normalized_code,
@@ -550,7 +554,10 @@ class LangChainOrchestrator:
             intent=intent,
             on_token=on_token,
         )
-        answer_markdown = self._with_scope_note(answer_markdown, scope_note)
+        if scope_note:
+            answer_markdown = self._remove_scope_boilerplate(answer_markdown)
+        if any(component.type == "table" for component in components):
+            answer_markdown = self._remove_markdown_tables(answer_markdown)
 
         return ChatResponse(
             property_code=normalized_code,
@@ -696,7 +703,11 @@ class LangChainOrchestrator:
         on_token: Callable[[str], None] | None = None,
     ) -> str:
         provider, _, model_name = model.partition(":")
-        if provider == "mock" or not model_name:
+        if (
+            provider == "mock"
+            or not model_name
+            or self._should_use_deterministic_answer(tool_results, components)
+        ):
             return self._mock_answer(
                 property_code,
                 message,
@@ -709,8 +720,17 @@ class LangChainOrchestrator:
             "You are a property-specific AI assistant. Answer only for the active "
             "property code. Use the supplied tool results; do not invent data. "
             "If a fact is missing for this property, say it is not available. "
+            "If the user mentions a different property, the backend already handles "
+            "the scope note. Do not repeat the mismatch, do not ask for another "
+            "property code, and do not explain that the active property is different; "
+            "just answer for the active property using the supplied evidence. "
             "Return concise Markdown. For yes/no questions, answer yes or no first. "
             "When using website context, cite the source URL in Markdown. "
+            "If UI components are provided, do not recreate the same table, chart, "
+            "KPI cards, or comparison view in Markdown; summarize the main takeaway "
+            "only. Do not mention UI components, frontend, JSON, rendering, or where "
+            "a table/chart appears. Never output Markdown tables or pipe-delimited "
+            "table rows. "
             "For website facts, only make claims supported by retrieved chunks whose "
             "evidence.confidence is medium or high. If the evidence is low-confidence "
             "or missing, say you do not see matching website evidence in the selected "
@@ -718,7 +738,8 @@ class LangChainOrchestrator:
             "Do not dump raw website chunks, navigation labels, fee-guide boilerplate, "
             "or disclaimer text; summarize the user-facing facts."
         )
-        prompt_tool_results = self._tool_results_for_prompt(message, tool_results)
+        prompt_tool_results = self._tool_results_for_prompt(message, tool_results, components)
+        prompt_components = self._components_for_prompt(components)
         prompt = ChatPromptTemplate.from_messages(
             [
                 SystemMessage(content=system_prompt),
@@ -730,13 +751,14 @@ class LangChainOrchestrator:
                         f"Tool results JSON:\n"
                         f"{json.dumps(prompt_tool_results, ensure_ascii=True)}\n\n"
                         f"UI components JSON:\n"
-                        f"{json.dumps([component.model_dump() for component in components])}"
+                        f"{json.dumps(prompt_components, ensure_ascii=True)}"
                     )
                 ),
             ]
         )
         chat_model = self._chat_model(provider, model_name)
-        if on_token:
+        should_stream = on_token and not any(component.type == "table" for component in components)
+        if should_stream:
             chunks: list[str] = []
             for chunk in (prompt | chat_model).stream({}):
                 content = str(chunk.content)
@@ -748,12 +770,60 @@ class LangChainOrchestrator:
         response = (prompt | chat_model).invoke({})
         return str(response.content)
 
+    @staticmethod
+    def _should_use_deterministic_answer(
+        tool_results: dict[str, Any],
+        components: list[UIComponent],
+    ) -> bool:
+        if components:
+            return True
+        deterministic_keys = {
+            "latest_kpis",
+            "rent_lease_comparison",
+            "occupancy_trend",
+            "charge_breakdown",
+            "top_balances",
+            "vacant_units",
+            "rent_by_unit_type",
+            "rent_by_bedroom_category",
+            "property_content",
+        }
+        return any(tool_results.get(key) for key in deterministic_keys)
+
     def _tool_results_for_prompt(
         self,
         message: str,
         tool_results: dict[str, Any],
+        components: list[UIComponent],
     ) -> dict[str, Any]:
         prompt_results = dict(tool_results)
+        table_titles = {
+            component.title
+            for component in components
+            if component.type == "table"
+        }
+        if "Top Balances" in table_titles and tool_results.get("top_balances"):
+            rows = tool_results["top_balances"]
+            prompt_results["top_balances"] = {
+                "ui_component": "Top Balances table",
+                "row_count": len(rows),
+                "summary": self._top_balances_summary(rows),
+                "note": (
+                    "Do not recreate the table in Markdown. Do not mention the UI, "
+                    "frontend, component, or where the table appears."
+                ),
+            }
+        if "Vacant Units" in table_titles and tool_results.get("vacant_units"):
+            rows = tool_results["vacant_units"]
+            prompt_results["vacant_units"] = {
+                "ui_component": "Vacant Units table",
+                "row_count": len(rows),
+                "summary": self._vacant_units_summary(rows),
+                "note": (
+                    "Do not recreate the table in Markdown. Do not mention the UI, "
+                    "frontend, component, or where the table appears."
+                ),
+            }
         retrieval_results = tool_results.get("property_content") or []
         if retrieval_results:
             text = message.lower()
@@ -798,6 +868,27 @@ class LangChainOrchestrator:
                 temperature=0.1,
             )
         raise ValueError(f"Unsupported model provider: {provider}")
+
+    @staticmethod
+    def _components_for_prompt(components: list[UIComponent]) -> list[dict[str, Any]]:
+        prompt_components: list[dict[str, Any]] = []
+        for component in components:
+            data = component.data or []
+            summary: dict[str, Any] = {
+                "type": component.type,
+                "title": component.title,
+            }
+            if component.description:
+                summary["description"] = component.description
+            if component.type == "table":
+                summary["row_count"] = len(data)
+                summary["columns"] = list(data[0].keys()) if data else []
+            elif component.type in {"bar_chart", "line_chart", "comparison_view"}:
+                summary["data_point_count"] = len(data)
+            elif component.type == "kpi_card":
+                summary["metric_count"] = len(data)
+            prompt_components.append(summary)
+        return prompt_components
 
     def _llm_intent_fallback(
         self,
@@ -1055,9 +1146,49 @@ class LangChainOrchestrator:
 
     @staticmethod
     def _with_scope_note(answer_markdown: str, scope_note: str | None) -> str:
-        if not scope_note:
-            return answer_markdown
-        return f"{scope_note}\n\n{answer_markdown}"
+        return answer_markdown
+
+    @staticmethod
+    def _remove_scope_boilerplate(answer_markdown: str) -> str:
+        filtered_lines = []
+        skip_phrases = [
+            "i notice there's a mismatch",
+            "there's a mismatch",
+            "you asked about",
+            "if you meant to ask about",
+            "please provide its property code",
+            "active property code",
+        ]
+        for line in answer_markdown.splitlines():
+            lowered = line.strip().lower()
+            if any(phrase in lowered for phrase in skip_phrases):
+                continue
+            filtered_lines.append(line)
+        return "\n".join(filtered_lines).strip()
+
+    @staticmethod
+    def _remove_markdown_tables(answer_markdown: str) -> str:
+        filtered_lines: list[str] = []
+        in_table = False
+        for line in answer_markdown.splitlines():
+            stripped = line.strip()
+            pipe_count = stripped.count("|")
+            looks_like_separator = bool(re.fullmatch(r"[\s|:=-]+", stripped))
+            looks_like_table = pipe_count >= 2 or looks_like_separator
+            if looks_like_table:
+                in_table = True
+                continue
+            if in_table and not stripped:
+                in_table = False
+                continue
+            if in_table and re.match(r"^[-+*]?\s*(unit|a\d+|b\d+|\+\s*\d+\s+more)\b", stripped, re.IGNORECASE):
+                continue
+            in_table = False
+            filtered_lines.append(line)
+
+        compacted = "\n".join(filtered_lines)
+        compacted = re.sub(r"\n{3,}", "\n\n", compacted)
+        return compacted.strip()
 
     @staticmethod
     def _display_section_label(section: str | None) -> str:
@@ -1408,9 +1539,6 @@ class LangChainOrchestrator:
     ) -> str | None:
         text = message.lower()
 
-        if LangChainOrchestrator._supported_structured_capability(text, intent):
-            return None
-
         for rule in UNSUPPORTED_STRUCTURED_AGGREGATE_RULES:
             if LangChainOrchestrator._contains_any(text, rule["allowed_terms"]):
                 continue
@@ -1423,6 +1551,9 @@ class LangChainOrchestrator:
             )
             if has_metric and has_aggregate and has_grouping:
                 return str(rule["label"])
+
+        if LangChainOrchestrator._supported_structured_capability(text, intent):
+            return None
 
         return None
 
@@ -1641,7 +1772,7 @@ class LangChainOrchestrator:
         return (
             f"### {profile['property_name']} (`{property_code}`)\n\n"
             f"I can't calculate **{unsupported_metric}** reliably from the available "
-            "analytics yet, so I won't derive it from partial rows.\n\n"
+            "analytics yet.\n\n"
             f"I can help with supported views like {supported_text}."
         )
 
