@@ -15,6 +15,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 - Markdown answers with source citations.
 - Streamed responses for real LLM calls.
 - Embedded UI components for KPIs, trends, charge breakdowns, vacant units, balances, and comparisons.
+- SQL review workflow for LLM-drafted, read-only analytics queries that are not covered by prebuilt tools.
 - Golden dataset and evaluation scripts for retrieval and answer quality.
 
 ## Project Structure
@@ -37,21 +38,21 @@ Prerequisites:
 - Python 3.12+
 - `uv`
 - Node.js 20+
-- Docker
+- Docker Desktop or Docker Engine
 
-Install Python dependencies:
+### Docker-First Local Setup
 
-```bash
-uv sync
-```
+If you want the easiest local setup, use Docker for MySQL and run the backend/frontend on your machine.
+You do not need to install a local MySQL server or the `mysql` command-line client for this path; the loader connects to the Docker database through the Python MySQL connector installed by `uv sync`.
 
-Create local environment config:
+1. Clone the repository and move into it.
+2. Create your local environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Add any real model keys you want to use:
+3. Add any real model keys you want to use:
 
 ```bash
 ANTHROPIC_API_KEY=...
@@ -59,15 +60,19 @@ OPENAI_API_KEY=...
 GROQ_API_KEY=...
 ```
 
-The mock model works without an API key and is useful for tests.
+4. Install Python dependencies:
 
-Start MySQL:
+```bash
+uv sync
+```
+
+5. Start the MySQL container:
 
 ```bash
 docker compose up -d mysql
 ```
 
-Load structured rent-roll data into MySQL:
+6. Wait for MySQL to be healthy, then load the structured rent-roll data:
 
 ```bash
 uv run python scripts/load_rent_roll_mysql.py --reset
@@ -75,7 +80,27 @@ uv run python scripts/load_rent_roll_mysql.py --reset
 
 The loader reads the rent-roll Excel files in `Data/RentRoll_LeaseCharges_NamesRedacted copy/` and creates normalized MySQL tables keyed by `property_code`.
 
-## Unstructured Data
+7. In a second terminal, start the backend:
+
+```bash
+uv run aker-api
+```
+
+8. In a third terminal, start the frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+9. Open the app in your browser:
+
+```text
+http://127.0.0.1:5173/
+```
+
+### Unstructured Data
 
 The scraped website data is already included under `Data/unstructured/`, and retrieval indexes are included under `Data/chroma/` and `Data/retrieval/`.
 
@@ -97,32 +122,10 @@ To manually test scoped retrieval:
 uv run python scripts/search_unstructured.py "EV charging bike storage" --property-code 115r --page-type amenities
 ```
 
-## Run The App
-
-Start the FastAPI backend:
-
-```bash
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
 Health check:
 
 ```bash
 curl http://127.0.0.1:8000/health
-```
-
-Start the React UI:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open:
-
-```text
-http://127.0.0.1:5173/
 ```
 
 ## API Examples
@@ -134,7 +137,7 @@ curl -X POST http://127.0.0.1:8000/chat \
   -H "Content-Type: application/json" \
   -d '{
     "property_code": "115r",
-    "model": "mock:mock-property-assistant",
+    "model": "anthropic:claude-haiku-4-5-20251001",
     "message": "What is the latest occupancy and market rent?"
   }'
 ```
@@ -201,13 +204,15 @@ flowchart LR
    - optional LLM fallback only when using a real LLM and local routing is uncertain.
 4. For structured analytics, the orchestrator checks a metric capability registry before tool execution.
 5. Supported metrics are routed to bounded tools; unsupported aggregate metrics return a clear limitation instead of using partial rows.
-6. Every structured SQL query is filtered by active `property_code`.
-7. Every retrieval query is filtered by active `property_code` metadata.
-8. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
-9. Retrieved chunks are annotated with evidence confidence before being passed to the LLM.
-10. The LLM receives scoped tool results, retrieval evidence, component JSON, and guardrails.
-11. The API returns Markdown, sources, tool results, and structured UI component definitions.
-12. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, and source links.
+6. For unsupported structured metrics in real-LLM mode, the LLM may draft a read-only SQL query. The backend validates that it is a single `SELECT`, references only approved tables, includes the active `property_code`, and has a bounded `LIMIT`.
+7. Valid SQL drafts are shown in the UI for user approval before execution.
+8. Every structured SQL query is filtered by active `property_code`.
+9. Every retrieval query is filtered by active `property_code` metadata.
+10. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
+11. Retrieved chunks are annotated with evidence confidence before being passed to the LLM.
+12. The LLM receives scoped tool results, retrieval evidence, component JSON, and guardrails.
+13. The API returns Markdown, sources, tool results, and structured UI component definitions.
+14. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
 
 ## Design Decisions
 
@@ -220,6 +225,8 @@ Hybrid retrieval was chosen over vector-only retrieval because property websites
 The orchestrator does not let the LLM freely choose arbitrary tools. Instead, the backend routes intent and calls bounded tools itself. This keeps property scoping enforceable end-to-end and makes responses more predictable during a demo.
 
 Structured analytics also pass through a lightweight capability registry. The registry documents which metric families are supported by complete, validated tools, such as latest KPIs, occupancy trend, top balances, vacant units, charge breakdown, and average market rent by unit type. If a user asks for an unsupported aggregate, such as average balance by bedroom category or median lease charges by unit type, the assistant does not compute it from a related partial result. It returns a limitation message and suggests supported views.
+
+For real LLMs, unsupported structured metrics can also enter a controlled SQL review workflow. The LLM drafts a candidate read-only query, but the backend does not execute it immediately. The SQL must pass validation for single-statement `SELECT` syntax, approved table names, active-property filtering, and row limits. Only after the user approves it in the UI does the backend execute the query and render the result as a table.
 
 The LLM is used for natural-language synthesis, not as the source of truth. Numeric facts come from MySQL tools, website facts come from retrieved chunks, and UI components are generated from structured tool outputs.
 

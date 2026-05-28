@@ -46,3 +46,6 @@ class MySQLDatabase:
     def fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
         rows = self.fetch_all(query, params)
         return rows[0] if rows else None
+
+    def fetch_sql(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+        return self.fetch_all(query, params)

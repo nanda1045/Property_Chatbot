@@ -42,6 +42,23 @@ export async function sendChat(params: {
   });
 }
 
+export async function executeApprovedSql(params: {
+  propertyCode: string;
+  model: string;
+  sql: string;
+  question: string;
+}): Promise<ChatResponse> {
+  return request("/sql/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      property_code: params.propertyCode,
+      model: params.model,
+      sql: params.sql,
+      question: params.question
+    })
+  });
+}
+
 type StreamHandlers = {
   onToken: (token: string) => void;
 };

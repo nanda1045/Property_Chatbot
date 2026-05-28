@@ -19,6 +19,7 @@ from app.services.intent_router import (
     get_intent_router,
 )
 from app.services.langchain_tools import build_langchain_tools
+from app.services.sql_approval import validate_read_only_sql
 
 STRUCTURED_TERMS = {
     "occupancy",
@@ -441,6 +442,19 @@ class LangChainOrchestrator:
         if wants_structured:
             unsupported_metric = self._unsupported_structured_aggregate(message, intent)
             if unsupported_metric:
+                provider, _, model_name = model.partition(":")
+                if provider != "mock" and model_name:
+                    sql_response = self._sql_approval_proposal_response(
+                        provider=provider,
+                        model_name=model_name,
+                        property_code=normalized_code,
+                        profile=profile,
+                        message=message,
+                        unsupported_metric=unsupported_metric,
+                        tool_results=tool_results,
+                    )
+                    if sql_response:
+                        return sql_response
                 return ChatResponse(
                     property_code=normalized_code,
                     model=model,
@@ -717,25 +731,33 @@ class LangChainOrchestrator:
             )
 
         system_prompt = (
-            "You are a property-specific AI assistant. Answer only for the active "
-            "property code. Use the supplied tool results; do not invent data. "
-            "If a fact is missing for this property, say it is not available. "
-            "If the user mentions a different property, the backend already handles "
-            "the scope note. Do not repeat the mismatch, do not ask for another "
-            "property code, and do not explain that the active property is different; "
-            "just answer for the active property using the supplied evidence. "
-            "Return concise Markdown. For yes/no questions, answer yes or no first. "
-            "When using website context, cite the source URL in Markdown. "
-            "If UI components are provided, do not recreate the same table, chart, "
-            "KPI cards, or comparison view in Markdown; summarize the main takeaway "
-            "only. Do not mention UI components, frontend, JSON, rendering, or where "
-            "a table/chart appears. Never output Markdown tables or pipe-delimited "
-            "table rows. "
-            "For website facts, only make claims supported by retrieved chunks whose "
-            "evidence.confidence is medium or high. If the evidence is low-confidence "
-            "or missing, say you do not see matching website evidence in the selected "
-            "property sample. "
-            "Do not dump raw website chunks, navigation labels, fee-guide boilerplate, "
+            "You are a property-specific AI assistant for rent-roll and property "
+            "website questions.\n\n"
+            "Core rules:\n"
+            "- Answer only for the active property_code supplied by the backend.\n"
+            "- Never switch property scope based on a property name in the user message.\n"
+            "- Use only supplied tool results and retrieved evidence; do not invent data.\n"
+            "- If the supplied data does not answer the question, say it is not available.\n"
+            "- Do not generate, rewrite, or claim to execute SQL. If a requested metric "
+            "would require a new SQL query, say that metric is not available yet unless "
+            "the backend has supplied approved results for it.\n"
+            "- If the user mentions a different property, the backend already handles "
+            "scope internally. Do not repeat the mismatch or ask for another property code.\n\n"
+            "Answer style:\n"
+            "- Return concise Markdown.\n"
+            "- For yes/no questions, answer yes or no first.\n"
+            "- When using website context, cite the source URL in Markdown.\n"
+            "- If UI components are provided, summarize the main takeaway only. Do not "
+            "recreate the same table, chart, KPI cards, or comparison view in Markdown.\n"
+            "- Do not mention UI components, frontend, JSON, rendering, or where a "
+            "table/chart appears.\n"
+            "- Never output Markdown tables or pipe-delimited table rows.\n\n"
+            "Evidence rules:\n"
+            "- For website facts, only make claims supported by retrieved chunks whose "
+            "evidence.confidence is medium or high.\n"
+            "- If website evidence is low-confidence or missing, say you do not see "
+            "matching website evidence in the selected property sample.\n"
+            "- Do not dump raw website chunks, navigation labels, fee-guide boilerplate, "
             "or disclaimer text; summarize the user-facing facts."
         )
         prompt_tool_results = self._tool_results_for_prompt(message, tool_results, components)
@@ -930,6 +952,108 @@ class LangChainOrchestrator:
         if intent in allowed:
             return str(intent)
         return None
+
+    def _sql_approval_proposal_response(
+        self,
+        provider: str,
+        model_name: str,
+        property_code: str,
+        profile: dict,
+        message: str,
+        unsupported_metric: str,
+        tool_results: dict[str, Any],
+    ) -> ChatResponse | None:
+        proposal = self._propose_sql(provider, model_name, property_code, message)
+        if not proposal:
+            return None
+
+        validation = validate_read_only_sql(proposal["sql"], property_code)
+        if not validation.ok or not validation.sql:
+            tool_results["sql_proposal_error"] = validation.error
+            return None
+
+        component = UIComponent(
+            type="sql_approval",
+            title="Review Proposed SQL",
+            description=(
+                "This query was drafted for a metric that is not covered by a "
+                "prebuilt analytics tool. Review it before running."
+            ),
+            data={
+                "sql": validation.sql,
+                "question": message,
+                "property_code": property_code,
+                "model": f"{provider}:{model_name}",
+                "explanation": proposal.get("explanation")
+                or f"Proposed query for {unsupported_metric}.",
+            },
+        )
+        tool_results["pending_sql_proposal"] = component.data
+        return ChatResponse(
+            property_code=property_code,
+            model=f"{provider}:{model_name}",
+            answer_markdown=(
+                f"### {profile['property_name']} (`{property_code}`)\n\n"
+                f"I don't have a prebuilt analytics tool for **{unsupported_metric}** yet, "
+                "but I drafted a read-only SQL query for review. Please approve it before "
+                "running the query."
+            ),
+            components=[component],
+            sources=[],
+            tool_results=tool_results,
+        )
+
+    def _propose_sql(
+        self,
+        provider: str,
+        model_name: str,
+        property_code: str,
+        message: str,
+    ) -> dict[str, str] | None:
+        system_prompt = (
+            "You draft read-only MySQL SELECT queries for a property analytics assistant. "
+            "Return only valid JSON with keys sql and explanation.\n\n"
+            "Rules:\n"
+            "- Generate exactly one SELECT statement.\n"
+            "- Use only these tables: properties, rent_roll_reports, rent_roll_units, "
+            "lease_charges, rent_roll_summary_groups, rent_roll_charge_summary.\n"
+            f"- The query must filter every relevant table to property_code = '{property_code}'.\n"
+            "- Prefer the latest report month unless the user requests an available period.\n"
+            "- Include LIMIT 100 or less.\n"
+            "- Do not use INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, SET, USE, CALL, "
+            "stored procedures, temporary tables, comments, or multiple statements.\n\n"
+            "Useful schema notes:\n"
+            "- rent_roll_units has unit, unit_type, sqft, resident_status, market_rent, "
+            "balance, report_id, property_code.\n"
+            "- rent_roll_reports has id, property_code, report_month.\n"
+            "- lease_charges has rent_roll_unit_id, report_id, property_code, charge_code, amount.\n"
+            "- rent_roll_summary_groups has property-level KPI rows by group_name.\n"
+            "- rent_roll_charge_summary has report-level charge totals by charge_code.\n"
+            "For latest month queries, join rent_roll_reports and filter report_month to "
+            "MAX(report_month) for the active property."
+        )
+        try:
+            response = self._chat_model(provider, model_name).invoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=f"User question: {message}"),
+                ]
+            )
+            content = str(response.content).strip()
+            if not content.startswith("{"):
+                match = re.search(r"\{.*\}", content, re.DOTALL)
+                content = match.group(0) if match else content
+            payload = json.loads(content)
+        except Exception:
+            return None
+
+        sql = str(payload.get("sql") or "").strip()
+        if not sql:
+            return None
+        return {
+            "sql": sql,
+            "explanation": str(payload.get("explanation") or "").strip(),
+        }
 
     def _mock_answer(
         self,

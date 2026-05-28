@@ -12,9 +12,10 @@ from fastapi.responses import StreamingResponse
 
 from app.core.config import Settings, get_settings
 from app.db.mysql import MySQLDatabase
-from app.schemas import ChatRequest, ChatResponse
+from app.schemas import ChatRequest, ChatResponse, SqlApprovalRequest, UIComponent
 from app.services.langchain_orchestrator import LangChainOrchestrator
 from app.services.rent_roll_repository import RentRollRepository
+from app.services.sql_approval import execute_approved_sql
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -51,11 +52,6 @@ def models(settings: SettingsDep) -> dict[str, object]:
     return {
         "models": [
             {
-                "id": "mock:mock-property-assistant",
-                "label": "Mock Assistant",
-                "provider": "mock",
-            },
-            {
                 "id": "openai:gpt-4.1-mini",
                 "label": "OpenAI GPT-4.1 Mini",
                 "provider": "openai",
@@ -88,6 +84,33 @@ def chat(request: ChatRequest, settings: SettingsDep) -> ChatResponse:
         property_code=request.property_code,
         message=request.message,
         model=request.model,
+    )
+
+
+@app.post("/sql/execute")
+def execute_sql(request: SqlApprovalRequest, settings: SettingsDep) -> ChatResponse:
+    normalized_code = request.property_code.lower()
+    validated_sql, rows = execute_approved_sql(settings, request.sql, normalized_code)
+    return ChatResponse(
+        property_code=normalized_code,
+        model=request.model,
+        answer_markdown=(
+            "I ran the approved read-only query for the selected property. "
+            f"It returned **{len(rows)}** row{'s' if len(rows) != 1 else ''}."
+        ),
+        components=[
+            UIComponent(
+                type="table",
+                title="Approved SQL Results",
+                data=rows,
+            )
+        ],
+        sources=[],
+        tool_results={
+            "approved_sql": validated_sql,
+            "question": request.question,
+            "row_count": len(rows),
+        },
     )
 
 

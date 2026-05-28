@@ -8,7 +8,14 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     property_code: str = Field(description="Active property code, for example 115r.")
     message: str
-    model: str = "mock:mock-property-assistant"
+    model: str = "anthropic:claude-haiku-4-5-20251001"
+
+
+class SqlApprovalRequest(BaseModel):
+    property_code: str = Field(description="Active property code, for example 115r.")
+    model: str = "anthropic:claude-haiku-4-5-20251001"
+    sql: str = Field(description="Backend-validated read-only SQL proposed for approval.")
+    question: str = Field(description="Original user question that produced the SQL proposal.")
 
 
 class UIComponent(BaseModel):

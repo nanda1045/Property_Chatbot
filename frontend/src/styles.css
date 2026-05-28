@@ -473,6 +473,7 @@ textarea:focus {
 .chart-panel,
 .table-panel,
 .comparison-panel,
+.sql-approval-panel,
 .json-panel {
   display: grid;
   gap: 14px;
@@ -484,6 +485,7 @@ textarea:focus {
 
 .table-panel,
 .comparison-panel,
+.sql-approval-panel,
 .json-panel {
   grid-column: 1 / -1;
 }
@@ -525,6 +527,39 @@ table {
   font-size: 13px;
   min-width: 680px;
   width: 100%;
+}
+
+.sql-approval-panel pre {
+  background: #f5f7f5;
+  border: 1px solid #dfe7e1;
+  border-radius: 8px;
+  color: #243032;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 14px;
+  white-space: pre-wrap;
+}
+
+.sql-approval-panel button {
+  align-self: center;
+  background: #2f7d64;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  justify-self: center;
+  padding: 8px 12px;
+  width: fit-content;
+}
+
+.sql-approval-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 th,

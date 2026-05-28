@@ -8,9 +8,7 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
-import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -18,6 +16,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
+
+import mysql.connector
 
 
 DATA_DIR = Path("Data/RentRoll_LeaseCharges_NamesRedacted copy")
@@ -802,25 +802,66 @@ def print_stats(reports: list[RentRollReport]) -> None:
     print("Property codes:", ", ".join(codes))
 
 
+def split_sql_statements(sql: str) -> list[str]:
+    statements: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    index = 0
+
+    while index < len(sql):
+        char = sql[index]
+        next_char = sql[index + 1] if index + 1 < len(sql) else ""
+
+        if quote is None and char == "-" and next_char == "-":
+            while index < len(sql) and sql[index] != "\n":
+                current.append(sql[index])
+                index += 1
+            continue
+
+        current.append(char)
+
+        if char in {"'", '"', "`"}:
+            if quote is None:
+                quote = char
+            elif quote == char:
+                previous_char = sql[index - 1] if index > 0 else ""
+                if previous_char != "\\":
+                    quote = None
+        elif char == ";" and quote is None:
+            statement = "".join(current).strip()
+            if statement:
+                statements.append(statement[:-1].strip())
+            current = []
+
+        index += 1
+
+    trailing = "".join(current).strip()
+    if trailing:
+        statements.append(trailing)
+    return [statement for statement in statements if statement]
+
+
 def run_mysql(sql: str, args: argparse.Namespace) -> None:
-    command = [
-        args.mysql_bin,
-        f"--host={args.host}",
-        f"--port={args.port}",
-        f"--user={args.user}",
-        "--protocol=tcp",
-    ]
-    env = os.environ.copy()
-    if args.password:
-        env["MYSQL_PWD"] = args.password
-    with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False, encoding="utf-8") as sql_file:
-        sql_file.write(sql)
-        sql_path = sql_file.name
+    connection = mysql.connector.connect(
+        host=args.host,
+        port=int(args.port),
+        user=args.user,
+        password=args.password,
+        autocommit=False,
+    )
     try:
-        with open(sql_path, "r", encoding="utf-8") as sql_input:
-            subprocess.run(command, stdin=sql_input, env=env, check=True)
+        cursor = connection.cursor()
+        try:
+            for statement in split_sql_statements(sql):
+                cursor.execute(statement)
+            connection.commit()
+        finally:
+            cursor.close()
+    except Exception:
+        connection.rollback()
+        raise
     finally:
-        Path(sql_path).unlink(missing_ok=True)
+        connection.close()
 
 
 def parse_args() -> argparse.Namespace:
@@ -832,7 +873,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--port", default=os.environ.get("MYSQL_PORT", "3306"))
     parser.add_argument("--user", default=os.environ.get("MYSQL_USER", "root"))
     parser.add_argument("--password", default=os.environ.get("MYSQL_PASSWORD", "root"))
-    parser.add_argument("--mysql-bin", default=os.environ.get("MYSQL_BIN", "mysql"))
     parser.add_argument("--codes", nargs="*", help="Optional property codes to load.")
     parser.add_argument("--reset", action="store_true", help="Drop and recreate the structured tables first.")
     parser.add_argument("--dry-run", action="store_true", help="Parse files and print counts without loading MySQL.")

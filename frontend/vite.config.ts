@@ -10,7 +10,8 @@ export default defineConfig({
       "/chat": "http://127.0.0.1:8000",
       "/health": "http://127.0.0.1:8000",
       "/models": "http://127.0.0.1:8000",
-      "/properties": "http://127.0.0.1:8000"
+      "/properties": "http://127.0.0.1:8000",
+      "/sql": "http://127.0.0.1:8000"
     }
   }
 });

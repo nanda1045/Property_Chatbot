@@ -14,8 +14,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ComponentRenderer } from "./components/ComponentRenderer";
-import { getModels, getProperties, sendChatStream } from "./lib/api";
-import type { ChatTurn, ModelOption, PropertyOption } from "./types";
+import { executeApprovedSql, getModels, getProperties, sendChatStream } from "./lib/api";
+import type { ChatTurn, ModelOption, PropertyOption, UIComponent } from "./types";
 
 const STARTER_QUESTIONS = [
   "What is the latest occupancy and market rent?",
@@ -42,7 +42,7 @@ function displayProperty(property?: PropertyOption) {
 export default function App() {
   const [models, setModels] = useState<ModelOption[]>([]);
   const [properties, setProperties] = useState<PropertyOption[]>([]);
-  const [model, setModel] = useState("mock:mock-property-assistant");
+  const [model, setModel] = useState("anthropic:claude-haiku-4-5-20251001");
   const [propertyCode, setPropertyCode] = useState("115r");
   const [message, setMessage] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -141,6 +141,58 @@ export default function App() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await submitQuestion(message);
+  }
+
+  async function handleSqlApproval(turnId: string, component: UIComponent) {
+    const data = component.data;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      return;
+    }
+    const payload = data as Record<string, unknown>;
+    const sql = typeof payload.sql === "string" ? payload.sql : "";
+    const question = typeof payload.question === "string" ? payload.question : "";
+    const approvedPropertyCode =
+      typeof payload.property_code === "string" ? payload.property_code : propertyCode;
+    const approvedModel = typeof payload.model === "string" ? payload.model : model;
+    if (!sql || !question) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await executeApprovedSql({
+        propertyCode: approvedPropertyCode,
+        model: approvedModel,
+        sql,
+        question
+      });
+      setTurns((current) =>
+        current.map((turn) =>
+          turn.id === turnId
+            ? {
+                ...turn,
+                response: {
+                  ...response,
+                  answer_markdown: `${turn.response?.answer_markdown ?? ""}\n\n${response.answer_markdown}`
+                }
+              }
+            : turn
+        )
+      );
+    } catch (error) {
+      setTurns((current) =>
+        current.map((turn) =>
+          turn.id === turnId
+            ? {
+                ...turn,
+                error: error instanceof Error ? error.message : "SQL approval failed."
+              }
+            : turn
+        )
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -271,6 +323,9 @@ export default function App() {
                           <ComponentRenderer
                             key={`${component.type}-${component.title}-${index}`}
                             component={component}
+                            onApprove={(approvalComponent) =>
+                              void handleSqlApproval(turn.id, approvalComponent)
+                            }
                           />
                         ))}
                       </div>

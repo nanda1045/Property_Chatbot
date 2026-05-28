@@ -373,6 +373,31 @@ function ComparisonPanel({ component }: { component: UIComponent }) {
   );
 }
 
+function SqlApprovalPanel({
+  component,
+  onApprove
+}: {
+  component: UIComponent;
+  onApprove?: (component: UIComponent) => void;
+}) {
+  const data = isRecord(component.data) ? component.data : {};
+  const sql = typeof data.sql === "string" ? data.sql : "";
+  const explanation = typeof data.explanation === "string" ? data.explanation : component.description;
+
+  return (
+    <section className="component-panel sql-approval-panel">
+      <div className="component-heading">
+        <h3>{component.title}</h3>
+        {explanation ? <p>{explanation}</p> : null}
+      </div>
+      <pre>{sql}</pre>
+      <button type="button" onClick={() => onApprove?.(component)} disabled={!sql || !onApprove}>
+        Run approved query
+      </button>
+    </section>
+  );
+}
+
 function JsonPanel({ component }: { component: UIComponent }) {
   return (
     <section className="component-panel json-panel">
@@ -382,7 +407,13 @@ function JsonPanel({ component }: { component: UIComponent }) {
   );
 }
 
-export function ComponentRenderer({ component }: { component: UIComponent }) {
+export function ComponentRenderer({
+  component,
+  onApprove
+}: {
+  component: UIComponent;
+  onApprove?: (component: UIComponent) => void;
+}) {
   switch (component.type) {
     case "kpi_card":
       return <KpiCard component={component} />;
@@ -394,6 +425,8 @@ export function ComponentRenderer({ component }: { component: UIComponent }) {
       return <TablePanel component={component} />;
     case "comparison_view":
       return <ComparisonPanel component={component} />;
+    case "sql_approval":
+      return <SqlApprovalPanel component={component} onApprove={onApprove} />;
     default:
       return <JsonPanel component={component} />;
   }
