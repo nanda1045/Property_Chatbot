@@ -45,14 +45,43 @@ Prerequisites:
 If you want the easiest local setup, use Docker for MySQL and run the backend/frontend on your machine.
 You do not need to install a local MySQL server or the `mysql` command-line client for this path; the loader connects to the Docker database through the Python MySQL connector installed by `uv sync`.
 
-1. Clone the repository and move into it.
-2. Create your local environment file:
+1. Install Docker Desktop (macOS/Windows) or Docker Engine (Linux):
+
+- macOS/Windows: https://www.docker.com/products/docker-desktop/
+- Linux: https://docs.docker.com/engine/install/
+
+2. Install `uv` (Python package manager):
 
 ```bash
+brew install uv
+```
+
+Windows (PowerShell):
+
+```powershell
+winget install --id Astral.uv -e
+```
+
+If Python is already installed:
+
+```bash
+pip install uv
+```
+
+3. Open the project folder in a terminal:
+
+```bash
+cd /path/to/AKER_Chatbot
+```
+
+4. Create the `.env` file, then copy the example values:
+
+```bash
+touch .env
 cp .env.example .env
 ```
 
-3. Add any real model keys you want to use:
+5. Add any real model keys in .env you want to use:
 
 ```bash
 ANTHROPIC_API_KEY=...
@@ -60,19 +89,19 @@ OPENAI_API_KEY=...
 GROQ_API_KEY=...
 ```
 
-4. Install Python dependencies:
+6. Install Python dependencies:
 
 ```bash
 uv sync
 ```
 
-5. Start the MySQL container:
+7. Start the MySQL container in new terminal:
 
 ```bash
 docker compose up -d mysql
 ```
 
-6. Wait for MySQL to be healthy, then load the structured rent-roll data:
+8. Wait for MySQL to be healthy, then load the structured rent-roll data:
 
 ```bash
 uv run python scripts/load_rent_roll_mysql.py --reset
@@ -80,13 +109,20 @@ uv run python scripts/load_rent_roll_mysql.py --reset
 
 The loader reads the rent-roll Excel files in `Data/RentRoll_LeaseCharges_NamesRedacted copy/` and creates normalized MySQL tables keyed by `property_code`.
 
-7. In a second terminal, start the backend:
+9. First-time setup only: scrape websites and build retrieval indexes:
+
+```bash
+uv run python scripts/scrape_property_sites.py
+uv run python scripts/ingest_unstructured.py --reset
+```
+
+10. In a second terminal, start the backend:
 
 ```bash
 uv run aker-api
 ```
 
-8. In a third terminal, start the frontend:
+11. In a third terminal, start the frontend:
 
 ```bash
 cd frontend
@@ -94,7 +130,7 @@ npm install
 npm run dev
 ```
 
-9. Open the app in your browser:
+12. Open the app in your browser:
 
 ```text
 http://127.0.0.1:5173/
@@ -102,7 +138,7 @@ http://127.0.0.1:5173/
 
 ### Unstructured Data
 
-The scraped website data is already included under `Data/unstructured/`, and retrieval indexes are included under `Data/chroma/` and `Data/retrieval/`.
+New users should run the scraper and ingestion steps at least once before starting the app so website questions have data to search.
 
 To re-scrape public property websites:
 
@@ -160,59 +196,36 @@ The system is organized as a scoped retrieval and orchestration pipeline.
 
 ```mermaid
 flowchart LR
-    User["User"] --> UI["React Chat UI<br/>Property + Model Selector"]
-    UI --> API["FastAPI<br/>/chat + /chat/stream"]
-
-    API --> Orchestrator["LangChain Orchestrator<br/>Intent Routing + Guardrails"]
-    Orchestrator --> Router["Hybrid Intent Router<br/>Rules + Local Semantic Routing"]
-
-    Orchestrator --> Tools["Scoped LangChain Tools"]
-    Tools --> MySQL["MySQL<br/>Structured Rent-Roll Tables"]
-    Tools --> Retriever["Hybrid Retriever<br/>Chroma + BM25 + RRF"]
-
-    Retriever --> Chroma["Chroma Vector Store<br/>Local Embeddings"]
-    Retriever --> BM25["SQLite BM25 Index"]
-
-    Scraper["Website Scraper"] --> Chunks["HTML Section-Aware Chunks"]
-    Chunks --> Chroma
-    Chunks --> BM25
-
-    Excel["Rent-Roll Excel Files"] --> Loader["Structured Data Loader"]
-    Loader --> MySQL
-
-    Orchestrator --> LLM["Selected LLM<br/>Claude / OpenAI / Mock"]
-    LLM --> Orchestrator
-
-    Orchestrator --> Response["Markdown Answer<br/>Sources + UI Component JSON"]
-    Response --> UI
-    UI --> Components["Rendered UI<br/>KPI Cards, Charts, Tables, Comparisons"]
-
-    classDef app fill:#eef7f1,stroke:#2f7d64,color:#1e2528;
-    classDef data fill:#f4f1ea,stroke:#b68445,color:#1e2528;
-    classDef llm fill:#eef4fb,stroke:#315f9c,color:#1e2528;
-
-    class UI,API,Orchestrator,Router,Tools,Retriever,Response,Components app;
-    class MySQL,Chroma,BM25,Scraper,Chunks,Excel,Loader data;
-    class LLM llm;
+  User["User"] --> UI["React Chat UI"]
+  UI --> API["FastAPI"]
+  API --> Orchestrator["Backend Orchestrator"]
+  Orchestrator --> Planner["LLM Planner"]
+  Orchestrator --> Tools["Tools"]
+  Tools --> MySQL["MySQL (Rent-Roll)"]
+  Tools --> Retrieval["Website Retrieval"]
+  Orchestrator --> SQLApproval["SQL Draft + Approval"]
+  Orchestrator --> LLM["LLM Answer"]
+  Orchestrator --> Response["Response + UI Components"]
+  Response --> UI
 ```
 
 1. The user selects a property in the React UI.
 2. The frontend sends `property_code`, selected `model`, and the user message to FastAPI.
-3. The backend routes the query with a hybrid intent router:
-   - deterministic rules for high-risk or common cases,
-   - local semantic routing for paraphrases,
-   - optional LLM fallback only when using a real LLM and local routing is uncertain.
-4. For structured analytics, the orchestrator checks a metric capability registry before tool execution.
-5. Supported metrics are routed to bounded tools; unsupported aggregate metrics return a clear limitation instead of using partial rows.
-6. For unsupported structured metrics in real-LLM mode, the LLM may draft a read-only SQL query. The backend validates that it is a single `SELECT`, references only approved tables, includes the active `property_code`, and has a bounded `LIMIT`.
-7. Valid SQL drafts are shown in the UI for user approval before execution.
-8. Every structured SQL query is filtered by active `property_code`.
-9. Every retrieval query is filtered by active `property_code` metadata.
-10. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
-11. Retrieved chunks are annotated with evidence confidence before being passed to the LLM.
-12. The LLM receives scoped tool results, retrieval evidence, component JSON, and guardrails.
-13. The API returns Markdown, sources, tool results, and structured UI component definitions.
-14. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
+3. The backend runs a deterministic router (rules + local embeddings) and, for real models, an LLM planner that proposes a route (structured, retrieval, hybrid, clarification, unsupported) plus tool names.
+4. Tool names are validated against the allowlist; property scoping is enforced server-side.
+5. For structured analytics, the orchestrator checks a metric capability registry before tool execution.
+6. Supported metrics are routed to bounded tools.
+7. For unsupported structured metrics, the LLM may draft a read-only SQL query instead of guessing from partial data.
+8. The backend validates SQL drafts before they reach the UI. The guard allows only a single `SELECT`, approved tables, explicit active-property filters for every referenced table, and a bounded `LIMIT`.
+9. Valid SQL drafts are shown in the UI for user approval before execution.
+10. Approved SQL is executed only after the user clicks the approval control.
+11. Every structured SQL query is filtered by active `property_code`.
+12. Every retrieval query is filtered by active `property_code` metadata.
+13. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
+14. Retrieved chunks are annotated with evidence confidence before being passed to the LLM.
+15. The LLM receives scoped tool results, retrieval evidence, component JSON, and guardrails.
+16. The API returns Markdown, sources, tool results, and structured UI component definitions.
+17. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
 
 ## Design Decisions
 
@@ -296,7 +309,7 @@ Evaluation coverage includes:
 - answer relevancy
 - completeness
 - citation quality
-- deterministic chat behavior with the mock model
+- deterministic routing and response behavior for supported queries
 
 ## Assumptions
 
@@ -313,7 +326,7 @@ Evaluation coverage includes:
 - The included local retrieval indexes make demos faster, but they can also be rebuilt from source data.
 - Intent routing uses local rules and embeddings for reliability. This is more predictable than fully agentic tool calling, but it means new query families may require adding examples or rules.
 - The LLM is not given unrestricted tool access. This reduces risk but makes the orchestration layer more explicit.
-- Structured analytics use curated SQL-backed tools and a lightweight capability registry rather than free-form LLM-generated SQL. This improves safety, testability, and property scoping, but unsupported metrics require adding a new repository method/tool or evolving the registry into a fuller metric catalog.
+- Structured analytics use curated SQL-backed tools for known metrics and a guarded SQL approval workflow for unsupported metrics. This improves safety, testability, and property scoping, but it is less automatic than unrestricted agentic SQL execution.
 - The frontend renders a curated set of UI components rather than arbitrary LLM-generated HTML, which is safer but less flexible.
 
 ## Limitations
@@ -325,8 +338,9 @@ Evaluation coverage includes:
 - The prototype is designed for local development, not production deployment.
 - There is no authentication or multi-user authorization layer.
 - MySQL must be running and loaded before structured-data questions will work.
-- The assistant does not answer arbitrary database metrics automatically. It currently supports the implemented rent-roll analytics tools and rejects unsupported aggregate-style metrics rather than answering with generated SQL or partial table results.
-- The capability registry catches common unsupported aggregate patterns, but it is not a complete natural-language SQL planner. New metric families such as renewal trends, bad debt percentage, lease expirations, or move-in/move-out analytics would need new catalog entries and validated queries.
+- The assistant does not execute arbitrary database metrics automatically. Unsupported structured metrics can produce a proposed read-only SQL query, but the user must approve it before execution.
+- The SQL approval guard is intentionally strict. Complex valid SQL may be rejected if it cannot prove every referenced table is explicitly scoped to the active property.
+- The capability registry catches common unsupported aggregate patterns, but it is not a complete natural-language SQL planner. New metric families such as renewal trends, bad debt percentage, lease expirations, or move-in/move-out analytics would still benefit from new catalog entries and validated tools.
 - If retrieval indexes are deleted, run `scripts/ingest_unstructured.py` again before testing website questions.
 
 ## Packaging Notes

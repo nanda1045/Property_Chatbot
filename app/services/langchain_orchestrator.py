@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -249,6 +250,28 @@ UNSUPPORTED_STRUCTURED_AGGREGATE_RULES = (
         "allowed_terms": (),
     },
 )
+LLM_PLAN_ROUTES = {"structured", "retrieval", "hybrid", "unsupported", "clarification"}
+UNSUPPORTED_FACT_TERMS = {
+    "crime",
+    "crime rate",
+    "public safety",
+    "safety",
+    "police",
+    "neighborhood safety",
+    "violent crime",
+    "property crime",
+    "robbery",
+    "assault",
+    "homicide",
+    "gun violence",
+}
+
+
+@dataclass(frozen=True)
+class LlmPlan:
+    route: str
+    tools: list[str]
+    reason: str | None = None
 ANSWER_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9'-]{1,}", re.IGNORECASE)
 YEAR_RE = re.compile(r"\b(20\d{2})\b")
 ANSWER_STOPWORDS = {
@@ -355,6 +378,24 @@ class LangChainOrchestrator:
         intent_route = self.intent_router.route(message)
         intent = intent_route.intent
         provider, _, model_name = model.partition(":")
+        planner_route: str | None = None
+        planned_tools: list[str] = []
+        planning_reason: str | None = None
+        if self._is_unsupported_fact_question(message):
+            planner_route = "unsupported"
+            planning_reason = "unsupported_external_fact"
+        elif provider != "mock" and model_name:
+            plan = self._llm_plan(message, provider, model_name)
+            if plan and self._validate_planned_tools(plan.tools):
+                planner_route = plan.route
+                planned_tools = plan.tools
+                planning_reason = plan.reason
+            else:
+                planning_reason = "planner_fallback"
+
+        if planning_reason:
+            tool_results["planning_reason"] = planning_reason
+
         if (
             intent is None
             and not intent_route.needs_clarification
@@ -374,6 +415,51 @@ class LangChainOrchestrator:
         location_only = location_only and not self._wants_location_website_context(
             message.lower()
         )
+
+        if planner_route == "clarification" and intent is None:
+            return ChatResponse(
+                property_code=normalized_code,
+                model=model,
+                answer_markdown=self._with_scope_note(
+                    self._clarification_answer(profile, normalized_code, message),
+                    scope_note,
+                ),
+                components=[],
+                sources=[],
+                tool_results=tool_results,
+            )
+
+        planner_unsupported_structured = (
+            planner_route == "unsupported"
+            and self._wants_structured(message)
+            and not self._is_unsupported_fact_question(message)
+        )
+
+        if planner_route == "unsupported" and not planner_unsupported_structured:
+            return ChatResponse(
+                property_code=normalized_code,
+                model=model,
+                answer_markdown=self._with_scope_note(
+                    self._unsupported_fact_answer(profile, normalized_code, message),
+                    scope_note,
+                ),
+                components=[],
+                sources=[],
+                tool_results=tool_results,
+            )
+
+        if planner_unsupported_structured:
+            wants_structured = True
+            wants_retrieval = False
+        elif planner_route == "structured":
+            wants_structured = True
+            wants_retrieval = False
+        elif planner_route == "retrieval":
+            wants_structured = False
+            wants_retrieval = True
+        elif planner_route == "hybrid":
+            wants_structured = True
+            wants_retrieval = True
 
         # Reviews/ratings/testimonials are website-only facts. They should not trigger
         # rent-roll KPI tools, otherwise irrelevant occupancy/charge cards get attached
@@ -441,8 +527,14 @@ class LangChainOrchestrator:
 
         if wants_structured:
             unsupported_metric = self._unsupported_structured_aggregate(message, intent)
+            if (
+                not unsupported_metric
+                and provider != "mock"
+                and model_name
+                and not self._supported_structured_capability(message.lower(), intent)
+            ):
+                unsupported_metric = "custom structured metric"
             if unsupported_metric:
-                provider, _, model_name = model.partition(":")
                 if provider != "mock" and model_name:
                     sql_response = self._sql_approval_proposal_response(
                         provider=provider,
@@ -493,24 +585,24 @@ class LangChainOrchestrator:
             retrieval_results = self._annotate_retrieval_evidence(message, retrieval_results)
             if is_review_query:
                 review_results = self._filter_review_results(retrieval_results)
-                tool_results["property_content"] = review_results
-                sources.extend(self._sources_from_retrieval(review_results))
                 if not review_results:
+                    tool_results = {
+                        "property_profile": profile,
+                        **({"planning_reason": tool_results.get("planning_reason")} if tool_results.get("planning_reason") else {}),
+                    }
                     return ChatResponse(
                         property_code=normalized_code,
                         model=model,
                         answer_markdown=self._with_scope_note(
-                            (
-                                f"### {profile['property_name']} (`{normalized_code}`)\n\n"
-                                "I don't see matching website evidence for reviews in "
-                                "the selected property sample."
-                            ),
+                            self._unsupported_fact_answer(profile, normalized_code, message),
                             scope_note,
                         ),
                         components=[],
                         sources=[],
                         tool_results=tool_results,
                     )
+                tool_results["property_content"] = review_results
+                sources.extend(self._sources_from_retrieval(review_results))
             elif is_unknown_fact_query:
                 evidence_results = self._filter_matching_evidence_results(
                     message,
@@ -953,6 +1045,75 @@ class LangChainOrchestrator:
             return str(intent)
         return None
 
+    def _llm_plan(self, message: str, provider: str, model_name: str) -> LlmPlan | None:
+        tools = sorted(self.tools.values(), key=lambda tool: tool.name)
+        tool_descriptions = "\n".join(
+            f"- {tool.name}: {tool.description or 'No description'}"
+            for tool in tools
+        )
+        system_prompt = (
+            "You are a tool planner for a property assistant. Return only valid JSON. "
+            "You must classify the user query into one route and suggest tool names.\n\n"
+            "Allowed routes: structured, retrieval, hybrid, unsupported, clarification.\n"
+            "Rules:\n"
+            "- Use structured when MySQL rent-roll tools can answer the question.\n"
+            "- Use retrieval when website content is needed (amenities, features, EV charging, parking).\n"
+            "- Use hybrid when both structured and website retrieval are needed.\n"
+            "- Use clarification for ambiguous requests such as 'compare this property'.\n"
+            "- Use unsupported for crime rate, public safety, or other data not in MySQL or scraped websites.\n"
+            "- Use unsupported for reviews unless reviews are explicitly present in the scraped website sample.\n"
+            "- Never include or infer property_code.\n"
+            "- Never output SQL.\n\n"
+            "Available tools:\n"
+            f"{tool_descriptions}\n\n"
+            "Return JSON with keys: route, tools, reason."
+        )
+
+        try:
+            response = self._chat_model(provider, model_name).invoke(
+                [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=f"User query: {message}"),
+                ]
+            )
+            content = str(response.content).strip()
+            if not content.startswith("{"):
+                match = re.search(r"\{.*\}", content, re.DOTALL)
+                content = match.group(0) if match else content
+            payload = json.loads(content)
+        except Exception:
+            return None
+
+        route = str(payload.get("route") or "").strip().lower()
+        if route not in LLM_PLAN_ROUTES:
+            return None
+        tools = payload.get("tools") or []
+        if not isinstance(tools, list):
+            return None
+        planned_tools = [str(tool).strip() for tool in tools if str(tool).strip()]
+        reason = str(payload.get("reason") or "").strip() or None
+        return LlmPlan(route=route, tools=planned_tools, reason=reason)
+
+    def _validate_planned_tools(self, planned_tools: list[str]) -> bool:
+        if not planned_tools:
+            return True
+        allowlist = set(self.tools)
+        return all(tool in allowlist for tool in planned_tools)
+
+    @staticmethod
+    def _is_unsupported_fact_question(message: str) -> bool:
+        lowered = message.lower()
+        return any(term in lowered for term in UNSUPPORTED_FACT_TERMS)
+
+    @staticmethod
+    def _unsupported_fact_answer(profile: dict, property_code: str, message: str) -> str:
+        return (
+            f"### {profile['property_name']} (`{property_code}`)\n\n"
+            "I don't have that data for this property. The available sources are "
+            "rent-roll metrics and the scraped property website content, and this question "
+            "is outside those sources."
+        )
+
     def _sql_approval_proposal_response(
         self,
         provider: str,
@@ -963,7 +1124,13 @@ class LangChainOrchestrator:
         unsupported_metric: str,
         tool_results: dict[str, Any],
     ) -> ChatResponse | None:
-        proposal = self._propose_sql(provider, model_name, property_code, message)
+        proposal = self._propose_sql(
+            provider=provider,
+            model_name=model_name,
+            property_code=property_code,
+            message=message,
+            unsupported_metric=unsupported_metric,
+        )
         if not proposal:
             return None
 
@@ -1009,51 +1176,103 @@ class LangChainOrchestrator:
         model_name: str,
         property_code: str,
         message: str,
+        unsupported_metric: str | None = None,
     ) -> dict[str, str] | None:
         system_prompt = (
             "You draft read-only MySQL SELECT queries for a property analytics assistant. "
-            "Return only valid JSON with keys sql and explanation.\n\n"
-            "Rules:\n"
-            "- Generate exactly one SELECT statement.\n"
+            "Return only valid JSON with keys sql and explanation. The backend will "
+            "validate the SQL before showing it to the user for approval.\n\n"
+            "Hard rules:\n"
+            "- Generate exactly one read-only SELECT statement.\n"
             "- Use only these tables: properties, rent_roll_reports, rent_roll_units, "
             "lease_charges, rent_roll_summary_groups, rent_roll_charge_summary.\n"
-            f"- The query must filter every relevant table to property_code = '{property_code}'.\n"
-            "- Prefer the latest report month unless the user requests an available period.\n"
-            "- Include LIMIT 100 or less.\n"
+            f"- The active property_code is '{property_code}'.\n"
+            "- Every table referenced in FROM or JOIN must be explicitly scoped by "
+            f"that table alias: alias.property_code = '{property_code}'.\n"
+            "- In subqueries, every table alias must also be explicitly scoped by "
+            f"property_code = '{property_code}'.\n"
+            "- For a single-table query, an unqualified property_code filter is allowed, "
+            "but alias.property_code is preferred.\n"
+            "- Include LIMIT 100 or less unless the query is a single aggregate row.\n"
             "- Do not use INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, SET, USE, CALL, "
-            "stored procedures, temporary tables, comments, or multiple statements.\n\n"
-            "Useful schema notes:\n"
-            "- rent_roll_units has unit, unit_type, sqft, resident_status, market_rent, "
-            "balance, report_id, property_code.\n"
-            "- rent_roll_reports has id, property_code, report_month.\n"
-            "- lease_charges has rent_roll_unit_id, report_id, property_code, charge_code, amount.\n"
-            "- rent_roll_summary_groups has property-level KPI rows by group_name.\n"
-            "- rent_roll_charge_summary has report-level charge totals by charge_code.\n"
-            "For latest month queries, join rent_roll_reports and filter report_month to "
-            "MAX(report_month) for the active property."
+            "stored procedures, temporary tables, comments, CTEs, or multiple statements.\n\n"
+            "Schema:\n"
+            "- properties(property_code, property_name, address, source_site)\n"
+            "- rent_roll_reports(id, property_code, report_month, as_of_date, source_filename)\n"
+            "- rent_roll_units(id, report_id, property_code, resident_group, unit, unit_type, "
+            "sqft, resident_status, market_rent, resident_deposit, other_deposit, "
+            "move_in_date, lease_expiration_date, move_out_date, balance)\n"
+            "- lease_charges(id, rent_roll_unit_id, report_id, property_code, charge_code, amount)\n"
+            "- rent_roll_summary_groups(id, report_id, property_code, group_name, "
+            "square_footage, market_rent, lease_charges, security_deposit, other_deposits, "
+            "unit_count, unit_occupancy_pct, sqft_occupied_pct, balance)\n"
+            "- rent_roll_charge_summary(id, report_id, property_code, charge_code, amount)\n\n"
+            "Latest-month pattern:\n"
+            "- For current/latest unit-level questions, join rent_roll_reports r on "
+            "r.id = u.report_id, filter u.property_code and r.property_code, and filter "
+            "r.report_month to a subquery selecting MAX(r2.report_month) from "
+            "rent_roll_reports r2 where r2.property_code is the active property.\n"
+            "- For latest charge summaries, join rent_roll_reports r on r.id = cs.report_id "
+            "and use the same MAX(report_month) pattern.\n"
+            "- For latest property KPI summaries, join rent_roll_reports r on "
+            "r.id = sg.report_id and use the same MAX(report_month) pattern.\n\n"
+            "Examples of valid scoping:\n"
+            f"SELECT u.unit FROM rent_roll_units u WHERE u.property_code = '{property_code}' LIMIT 10\n"
+            f"SELECT u.unit, r.report_month FROM rent_roll_units u JOIN rent_roll_reports r "
+            f"ON r.id = u.report_id WHERE u.property_code = '{property_code}' "
+            f"AND r.property_code = '{property_code}' LIMIT 10"
         )
-        try:
-            response = self._chat_model(provider, model_name).invoke(
-                [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=f"User question: {message}"),
-                ]
-            )
-            content = str(response.content).strip()
-            if not content.startswith("{"):
-                match = re.search(r"\{.*\}", content, re.DOTALL)
-                content = match.group(0) if match else content
-            payload = json.loads(content)
-        except Exception:
-            return None
+        chat_model = self._chat_model(provider, model_name)
+        prompt = (
+            f"User question: {message}\n"
+            f"Requested unsupported metric label: {unsupported_metric or 'not provided'}\n\n"
+            "Draft the safest SQL that answers the user question from the schema. "
+            "If the question asks for a specific month/year, include that filter. "
+            "If it asks for current/latest data, use the latest-month pattern."
+        )
+        last_error: str | None = None
+        last_sql: str | None = None
 
-        sql = str(payload.get("sql") or "").strip()
-        if not sql:
-            return None
-        return {
-            "sql": sql,
-            "explanation": str(payload.get("explanation") or "").strip(),
-        }
+        for attempt in range(3):
+            try:
+                human_content = prompt
+                if last_error and last_sql:
+                    human_content = (
+                        f"The previous SQL failed validation:\n{last_sql}\n\n"
+                        f"Validation error: {last_error}\n\n"
+                        "Repair the SQL so it follows every hard rule. Return only JSON "
+                        "with keys sql and explanation."
+                    )
+                response = chat_model.invoke(
+                    [
+                        SystemMessage(content=system_prompt),
+                        HumanMessage(content=human_content),
+                    ]
+                )
+                content = str(response.content).strip()
+                if not content.startswith("{"):
+                    match = re.search(r"\{.*\}", content, re.DOTALL)
+                    content = match.group(0) if match else content
+                payload = json.loads(content)
+            except Exception:
+                return None
+
+            sql = str(payload.get("sql") or "").strip()
+            explanation = str(payload.get("explanation") or "").strip()
+            if not sql:
+                return None
+
+            validation = validate_read_only_sql(sql, property_code)
+            if validation.ok and validation.sql:
+                return {
+                    "sql": validation.sql,
+                    "explanation": explanation,
+                }
+
+            last_sql = sql
+            last_error = validation.error or "The SQL did not pass validation."
+
+        return None
 
     def _mock_answer(
         self,
@@ -1114,8 +1333,8 @@ class LangChainOrchestrator:
                 return "\n\n".join(lines)
 
             matched_terms: set[str] = set()
-            matched_evidence: list[str] = []
-            fallback_evidence = []
+            matched_evidence: list[dict[str, str]] = []
+            fallback_evidence: list[dict[str, str]] = []
             for result in retrieval_results[:3]:
                 metadata = result["metadata"]
                 matched_line_details = self._matching_content_line_details(
@@ -1137,7 +1356,10 @@ class LangChainOrchestrator:
                 if not snippet:
                     continue
                 section = metadata.get("section_heading") or metadata.get("page_type")
-                item = f"- **{self._display_section_label(section)}**: {snippet}"
+                item = {
+                    "section": self._display_section_label(section),
+                    "snippet": snippet,
+                }
                 if matched_lines:
                     for detail in matched_line_details:
                         matched_terms.update(detail["terms"])
@@ -1146,16 +1368,18 @@ class LangChainOrchestrator:
                     fallback_evidence.append(item)
 
             evidence = matched_evidence or fallback_evidence
-            intro = "Relevant website evidence:"
             if self._is_yes_no_question(message) and matched_evidence:
-                intro = self._yes_no_retrieval_intro(matched_terms)
+                lines.append(
+                    self._yes_no_retrieval_answer(matched_terms, evidence)
+                )
             elif self._is_yes_no_question(message):
                 lines.append(
                     "I don't see matching website evidence for that in the selected "
                     "property sample."
                 )
                 return "\n\n".join(lines)
-            lines.append(intro + "\n" + "\n".join(evidence))
+            else:
+                lines.append(self._website_evidence_answer(evidence))
 
         if len(lines) == 1:
             lines.append(f"I found the property, but no matching data for: {message}")
@@ -1683,6 +1907,10 @@ class LangChainOrchestrator:
 
     @staticmethod
     def _supported_structured_capability(text: str, intent: str | None = None) -> str | None:
+        if LangChainOrchestrator._wants_executive_summary(text, intent):
+            return "latest_kpis"
+        if LangChainOrchestrator._wants_kpi_cards(text, intent):
+            return "latest_kpis"
         if LangChainOrchestrator._wants_rent_by_unit_type(text, intent):
             if (
                 ("market rent" in text or "average rent" in text or "avg rent" in text)
@@ -1961,7 +2189,10 @@ class LangChainOrchestrator:
             self._vacant_unit_label(row) for row in rows[:8]
         )
         extra = "" if len(rows) <= 8 else f", plus {len(rows) - 8} more"
-        return f"As of **{report_month}**, vacant units include {units}{extra}."
+        return (
+            f"As of **{report_month}**, there are **{len(rows)} vacant units**. "
+            f"They include {units}{extra}."
+        )
 
     @staticmethod
     def _vacant_unit_label(row: dict) -> str:
@@ -1998,8 +2229,7 @@ class LangChainOrchestrator:
                 for row in bedroom_rows
             )
             bedroom_sentence = (
-                "Using the recognizable floorplan-code pattern, the broader bedroom "
-                f"category averages are {bedroom_text}. "
+                f"By bedroom category, the average market rents are {bedroom_text}. "
             )
 
         sorted_rows = sorted(rows, key=lambda row: row["avg_market_rent"], reverse=True)
@@ -2011,8 +2241,8 @@ class LangChainOrchestrator:
             for row in top_rows
         )
         return (
-            f"{bedroom_sentence}For the detailed floorplan/unit-type codes, average "
-            f"market rent ranges from "
+            f"{bedroom_sentence}Across detailed floorplan codes, average market rent "
+            f"ranges from "
             f"**{self._format_money(lowest['avg_market_rent'])}** "
             f"(**{lowest['unit_type']}**) to "
             f"**{self._format_money(highest['avg_market_rent'])}** "
@@ -2134,7 +2364,7 @@ class LangChainOrchestrator:
         return list(dict.fromkeys(tokens))
 
     @staticmethod
-    def _yes_no_retrieval_intro(matched_terms: set[str]) -> str:
+    def _yes_no_retrieval_answer(matched_terms: set[str], evidence: list[dict[str, str]]) -> str:
         amenities = []
         if "bike" in matched_terms or "storage" in matched_terms:
             amenities.append("bike storage")
@@ -2143,9 +2373,28 @@ class LangChainOrchestrator:
         if "pet" in matched_terms:
             amenities.append("pet-friendly features")
 
+        details = [
+            f"- **{item['section']}**: {item['snippet']}"
+            for item in evidence[:3]
+        ]
         if amenities:
-            return f"Yes, this property has {LangChainOrchestrator._join_phrase(amenities)}."
-        return "Yes. I found matching website evidence for this property:"
+            intro = f"Yes, this property has {LangChainOrchestrator._join_phrase(amenities)}."
+        else:
+            intro = "Yes. The selected property's website lists a matching feature."
+        return intro + "\n\n" + "\n".join(details)
+
+    @staticmethod
+    def _website_evidence_answer(evidence: list[dict[str, str]]) -> str:
+        if not evidence:
+            return "I don't see matching website evidence for that in the selected property sample."
+        details = [
+            f"- **{item['section']}**: {item['snippet']}"
+            for item in evidence[:3]
+        ]
+        return (
+            "Here is what I found on the selected property's website:\n\n"
+            + "\n".join(details)
+        )
 
     @staticmethod
     def _join_phrase(items: list[str]) -> str:

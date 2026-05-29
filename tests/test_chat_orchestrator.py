@@ -166,12 +166,11 @@ def test_reviews_query_does_not_attach_irrelevant_kpis_or_sources(
     assert response.status_code == 200
     body = response.json()
     answer = body["answer_markdown"]
-    assert "don't see matching website evidence for reviews" in answer
+    assert "don't have that data" in answer.lower()
     assert "96.66%" not in answer
     assert body["components"] == []
     assert body["sources"] == []
-    assert set(body["tool_results"]) == {"property_profile", "property_content"}
-    assert body["tool_results"]["property_content"] == []
+    assert set(body["tool_results"]) == {"property_profile"}
 
 
 def test_unknown_website_fact_query_does_not_attach_irrelevant_kpis_or_sources(
@@ -200,6 +199,105 @@ def test_unknown_website_fact_query_does_not_attach_irrelevant_kpis_or_sources(
     assert set(body["tool_results"]) == {"property_profile", "property_content"}
     assert body["tool_results"]["property_content"] == []
     assert "latest_kpis" not in body["tool_results"]
+
+
+def test_crime_rate_is_unsupported_and_returns_no_sources_or_components(
+    mysql_db,
+    hybrid_retriever,
+) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat",
+        json={
+            "property_code": "115r",
+            "model": "mock:mock-property-assistant",
+            "message": "What is the crime rate around this property?",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "don't have that data" in body["answer_markdown"].lower()
+    assert body["components"] == []
+    assert body["sources"] == []
+    assert set(body["tool_results"]) == {"property_profile", "planning_reason"}
+
+
+def test_ev_charging_routes_to_retrieval_only(mysql_db, hybrid_retriever) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat",
+        json={
+            "property_code": "115r",
+            "model": "mock:mock-property-assistant",
+            "message": "Does this property have EV charging?",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sources"]
+    assert "property_content" in body["tool_results"]
+    assert "latest_kpis" not in body["tool_results"]
+
+
+def test_occupancy_routes_to_structured_only(mysql_db, hybrid_retriever) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat",
+        json={
+            "property_code": "115r",
+            "model": "mock:mock-property-assistant",
+            "message": "What is the latest occupancy?",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "latest_kpis" in body["tool_results"]
+    assert "property_content" not in body["tool_results"]
+    assert body["sources"] == []
+
+
+def test_hybrid_query_calls_structured_and_retrieval(mysql_db, hybrid_retriever) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat",
+        json={
+            "property_code": "115r",
+            "model": "mock:mock-property-assistant",
+            "message": "What is the latest occupancy and does it have parking?",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "latest_kpis" in body["tool_results"]
+    assert "property_content" in body["tool_results"]
+    assert body["sources"]
+
+
+def test_compare_property_prompts_for_clarification(mysql_db, hybrid_retriever) -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat",
+        json={
+            "property_code": "115r",
+            "model": "mock:mock-property-assistant",
+            "message": "Compare this property",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "what would you like to look at" in body["answer_markdown"].lower()
+    assert body["components"] == []
+    assert body["sources"] == []
 
 
 def test_mentioned_property_mismatch_adds_inline_scope_note(
