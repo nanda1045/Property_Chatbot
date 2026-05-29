@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -20,7 +19,15 @@ from app.services.intent_router import (
     get_intent_router,
 )
 from app.services.langchain_tools import build_langchain_tools
-from app.services.sql_approval import validate_read_only_sql
+from app.services.llm_tool_planner import (
+    LLMToolPlanner,
+    RetrievalQuery,
+    StructuredToolCall,
+    ToolPlan,
+    UNSUPPORTED_FACT_TERMS,
+    validate_tool_plan,
+)
+from app.services.sql_approval import draft_sql_for_approval, validate_drafted_sql
 
 STRUCTURED_TERMS = {
     "occupancy",
@@ -250,28 +257,16 @@ UNSUPPORTED_STRUCTURED_AGGREGATE_RULES = (
         "allowed_terms": (),
     },
 )
-LLM_PLAN_ROUTES = {"structured", "retrieval", "hybrid", "unsupported", "clarification"}
-UNSUPPORTED_FACT_TERMS = {
-    "crime",
-    "crime rate",
-    "public safety",
-    "safety",
-    "police",
-    "neighborhood safety",
-    "violent crime",
-    "property crime",
-    "robbery",
-    "assault",
-    "homicide",
-    "gun violence",
+STRUCTURED_TOOL_ALLOWLIST = {
+    "get_property_profile",
+    "get_latest_property_kpis",
+    "get_occupancy_trend",
+    "get_charge_breakdown",
+    "get_top_balances",
+    "get_vacant_units",
+    "get_rent_by_unit_type",
+    "get_report_periods",
 }
-
-
-@dataclass(frozen=True)
-class LlmPlan:
-    route: str
-    tools: list[str]
-    reason: str | None = None
 ANSWER_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9'-]{1,}", re.IGNORECASE)
 YEAR_RE = re.compile(r"\b(20\d{2})\b")
 ANSWER_STOPWORDS = {
@@ -372,123 +367,93 @@ class LangChainOrchestrator:
                 model=model,
                 answer_markdown=f"I could not find property code `{normalized_code}`.",
             )
+
         tool_results["property_profile"] = profile
         scope_note = self._property_scope_note(message, profile)
 
         intent_route = self.intent_router.route(message)
         intent = intent_route.intent
         provider, _, model_name = model.partition(":")
-        planner_route: str | None = None
-        planned_tools: list[str] = []
-        planning_reason: str | None = None
-        if self._is_unsupported_fact_question(message):
-            planner_route = "unsupported"
-            planning_reason = "unsupported_external_fact"
-        elif provider != "mock" and model_name:
-            plan = self._llm_plan(message, provider, model_name)
-            if plan and self._validate_planned_tools(plan.tools):
-                planner_route = plan.route
-                planned_tools = plan.tools
-                planning_reason = plan.reason
-            else:
-                planning_reason = "planner_fallback"
 
-        if planning_reason:
-            tool_results["planning_reason"] = planning_reason
-
-        if (
-            intent is None
-            and not intent_route.needs_clarification
-            and provider != "mock"
-            and model_name
-        ):
-            fallback_intent = self._llm_intent_fallback(provider, model_name, message)
-            if fallback_intent:
-                intent = fallback_intent
-
-        wants_structured = self._wants_structured(message) or intent in STRUCTURED_INTENTS
-        wants_retrieval = self._wants_retrieval(message) or intent in RETRIEVAL_INTENTS
-        is_review_query = self._wants_reviews(message.lower())
-        location_only = self._wants_location_answer(
-            message.lower()
-        ) or intent == "location"
-        location_only = location_only and not self._wants_location_website_context(
-            message.lower()
-        )
-
-        if planner_route == "clarification" and intent is None:
-            return ChatResponse(
-                property_code=normalized_code,
-                model=model,
-                answer_markdown=self._with_scope_note(
-                    self._clarification_answer(profile, normalized_code, message),
-                    scope_note,
-                ),
-                components=[],
-                sources=[],
-                tool_results=tool_results,
-            )
-
-        planner_unsupported_structured = (
-            planner_route == "unsupported"
-            and self._wants_structured(message)
-            and not self._is_unsupported_fact_question(message)
-        )
-
-        if planner_route == "unsupported" and not planner_unsupported_structured:
-            return ChatResponse(
-                property_code=normalized_code,
-                model=model,
-                answer_markdown=self._with_scope_note(
-                    self._unsupported_fact_answer(profile, normalized_code, message),
-                    scope_note,
-                ),
-                components=[],
-                sources=[],
-                tool_results=tool_results,
-            )
-
-        if planner_unsupported_structured:
-            wants_structured = True
-            wants_retrieval = False
-        elif planner_route == "structured":
-            wants_structured = True
-            wants_retrieval = False
-        elif planner_route == "retrieval":
-            wants_structured = False
-            wants_retrieval = True
-        elif planner_route == "hybrid":
-            wants_structured = True
-            wants_retrieval = True
-
-        # Reviews/ratings/testimonials are website-only facts. They should not trigger
-        # rent-roll KPI tools, otherwise irrelevant occupancy/charge cards get attached
-        # when no review evidence exists in the scraped website sample.
-        if is_review_query:
-            wants_structured = False
-            wants_retrieval = True
-
-        is_unknown_fact_query = (
-            not is_review_query
-            and not wants_structured
-            and not wants_retrieval
-            and not location_only
-            and self._looks_like_property_fact_question(message)
-        )
-        if is_unknown_fact_query:
-            wants_structured = False
-            wants_retrieval = True
+        location_only = (
+            self._wants_location_answer(message.lower()) or intent == "location"
+        ) and not self._wants_location_website_context(message.lower())
 
         if location_only:
-            wants_retrieval = False
-        if intent_route.needs_clarification or self._needs_clarification(
-            message, wants_structured, wants_retrieval
-        ):
+            answer_markdown = (
+                f"### {profile['property_name']} (`{normalized_code}`)\n\n"
+                f"{self._location_answer(profile, attempted_website_lookup=False)}"
+            )
+            return ChatResponse(
+                property_code=normalized_code,
+                model=model,
+                answer_markdown=self._with_scope_note(answer_markdown, scope_note),
+                components=[],
+                sources=[],
+                tool_results=tool_results,
+            )
+
+        planner = LLMToolPlanner(STRUCTURED_TOOL_ALLOWLIST, self.intent_router)
+
+        structured_tool_desc = "\n".join(
+            f"- {name}: {self.tools[name].description or 'No description'}"
+            for name in sorted(STRUCTURED_TOOL_ALLOWLIST)
+            if name in self.tools
+        )
+
+        retrieval_desc = (
+            self.tools["search_property_content"].description
+            if "search_property_content" in self.tools
+            else "Search scraped website content for property-specific evidence."
+        )
+
+        data_sources_desc = (
+            "Available data sources are structured MySQL rent-roll data and scraped "
+            "public property website content. MySQL supports occupancy, vacancy, market "
+            "rent, lease charges, balances, charge breakdown, rent by unit type, and "
+            "report periods. Website retrieval supports public page content such as "
+            "amenities, floorplans, parking, EV charging, pet policy, neighborhood, "
+            "contact, fee guide, residents, FAQs, and gallery text. External data such "
+            "as crime rate, school ratings, Google reviews, resident satisfaction, "
+            "demographics, NOI, cap rate, and market comps is not available unless "
+            "explicitly scraped or loaded."
+        )
+
+        plan: ToolPlan | None = None
+        chat_invoke: Callable[[list[dict[str, str]]], str] | None = None
+
+        if provider != "mock" and model_name:
+            def chat_invoke(messages: list[dict[str, str]]) -> str:
+                response = self._chat_model(provider, model_name).invoke(
+                    [
+                        SystemMessage(content=messages[0]["content"]),
+                        HumanMessage(content=messages[1]["content"]),
+                    ]
+                )
+                return str(response.content)
+
+            plan = planner.plan_with_llm(
+                property_code=normalized_code,
+                property_name=profile.get("property_name") or normalized_code,
+                message=message,
+                structured_tool_descriptions=structured_tool_desc,
+                retrieval_tool_description=retrieval_desc,
+                data_sources_description=data_sources_desc,
+                chat_model=chat_invoke,
+            )
+
+        if not plan:
+            plan = planner.deterministic_plan(message)
+
+        plan = validate_tool_plan(plan, STRUCTURED_TOOL_ALLOWLIST)
+
+        if plan.route == "clarification":
             return ChatResponse(
                 property_code=normalized_code,
                 model=model,
                 answer_markdown=self._with_scope_note(
-                    self._clarification_answer(profile, normalized_code, message),
+                    plan.clarification_question
+                    or self._clarification_answer(profile, normalized_code, message),
                     scope_note,
                 ),
                 components=[],
@@ -496,17 +461,108 @@ class LangChainOrchestrator:
                 tool_results=tool_results,
             )
 
-        if not wants_structured and not wants_retrieval and not location_only:
-            wants_structured = True
-            wants_retrieval = True
+        if plan.route == "unsupported":
+            return ChatResponse(
+                property_code=normalized_code,
+                model=model,
+                answer_markdown=self._with_scope_note(
+                    plan.unsupported_reason
+                    or self._unsupported_fact_answer(profile, normalized_code, message),
+                    scope_note,
+                ),
+                components=[],
+                sources=[],
+                tool_results=tool_results,
+            )
+
+        if plan.route == "sql_approval":
+            if not chat_invoke or not plan.sql_request:
+                return ChatResponse(
+                    property_code=normalized_code,
+                    model=model,
+                    answer_markdown=self._with_scope_note(
+                        self._sql_approval_unavailable_answer(profile, normalized_code),
+                        scope_note,
+                    ),
+                    components=[],
+                    sources=[],
+                    tool_results=tool_results,
+                )
+
+            drafted = draft_sql_for_approval(
+                message=message,
+                property_code=normalized_code,
+                property_name=profile.get("property_name") or normalized_code,
+                sql_request=plan.sql_request,
+                chat_model=chat_invoke,
+            )
+            if not drafted:
+                return ChatResponse(
+                    property_code=normalized_code,
+                    model=model,
+                    answer_markdown=self._with_scope_note(
+                        self._sql_approval_unavailable_answer(profile, normalized_code),
+                        scope_note,
+                    ),
+                    components=[],
+                    sources=[],
+                    tool_results=tool_results,
+                )
+
+            is_valid, validation_message = validate_drafted_sql(drafted.sql)
+            if not is_valid:
+                tool_results["sql_draft_error"] = validation_message
+                return ChatResponse(
+                    property_code=normalized_code,
+                    model=model,
+                    answer_markdown=self._with_scope_note(
+                        self._sql_approval_unavailable_answer(profile, normalized_code),
+                        scope_note,
+                    ),
+                    components=[],
+                    sources=[],
+                    tool_results=tool_results,
+                )
+
+            component = UIComponent(
+                type="sql_approval",
+                title="Review SQL before execution",
+                description=drafted.explanation,
+                data={
+                    "sql": drafted.sql,
+                    "explanation": drafted.explanation,
+                    "parameters": drafted.parameters,
+                    "safety_notes": drafted.safety_notes,
+                    "status": "pending_approval",
+                    "executable": False,
+                },
+            )
+            tool_results["sql_draft"] = component.data
+            return ChatResponse(
+                property_code=normalized_code,
+                model=model,
+                answer_markdown=(
+                    f"### {profile['property_name']} (`{normalized_code}`)\n\n"
+                    "This question needs a custom rent-roll query. I drafted a "
+                    "read-only SQL query for review, but it has not been run."
+                ),
+                components=[component],
+                sources=[],
+                tool_results=tool_results,
+            )
+
+        wants_structured = plan.route in {"structured", "hybrid"}
+        wants_retrieval = plan.route in {"retrieval", "hybrid"}
 
         requested_years = self._requested_years(message)
         if wants_structured and requested_years:
             report_periods = self._call_tool("get_report_periods", property_code=normalized_code)
             tool_results["report_periods"] = report_periods
+
             unavailable_years = [
                 year for year in requested_years if year not in report_periods.get("years", [])
             ]
+
             if unavailable_years:
                 return ChatResponse(
                     property_code=normalized_code,
@@ -527,26 +583,7 @@ class LangChainOrchestrator:
 
         if wants_structured:
             unsupported_metric = self._unsupported_structured_aggregate(message, intent)
-            if (
-                not unsupported_metric
-                and provider != "mock"
-                and model_name
-                and not self._supported_structured_capability(message.lower(), intent)
-            ):
-                unsupported_metric = "custom structured metric"
             if unsupported_metric:
-                if provider != "mock" and model_name:
-                    sql_response = self._sql_approval_proposal_response(
-                        provider=provider,
-                        model_name=model_name,
-                        property_code=normalized_code,
-                        profile=profile,
-                        message=message,
-                        unsupported_metric=unsupported_metric,
-                        tool_results=tool_results,
-                    )
-                    if sql_response:
-                        return sql_response
                 return ChatResponse(
                     property_code=normalized_code,
                     model=model,
@@ -563,33 +600,35 @@ class LangChainOrchestrator:
                     tool_results=tool_results,
                 )
 
-        if wants_structured:
-            self._collect_structured(
+            self._collect_structured_from_plan(
                 property_code=normalized_code,
                 message=message,
                 tool_results=tool_results,
                 components=components,
+                structured_tools=plan.structured_tools,
                 intent=intent,
             )
 
         if wants_retrieval:
-            page_type = self._infer_page_type(message)
-            n_results = 10 if page_type == "floorplans" else 5
-            retrieval_results = self._call_tool(
-                "search_property_content",
-                property_code=normalized_code,
-                query=message,
-                page_type=page_type,
-                n_results=n_results,
-            )
+            retrieval_results: list[dict[str, Any]] = []
+
+            for query in plan.retrieval_queries:
+                results = self._call_tool(
+                    "search_property_content",
+                    property_code=normalized_code,
+                    query=query.query,
+                    page_type=query.page_type,
+                    n_results=query.n_results,
+                )
+                retrieval_results.extend(results)
+
             retrieval_results = self._annotate_retrieval_evidence(message, retrieval_results)
+
+            is_review_query = self._wants_reviews(message.lower())
+
             if is_review_query:
                 review_results = self._filter_review_results(retrieval_results)
                 if not review_results:
-                    tool_results = {
-                        "property_profile": profile,
-                        **({"planning_reason": tool_results.get("planning_reason")} if tool_results.get("planning_reason") else {}),
-                    }
                     return ChatResponse(
                         property_code=normalized_code,
                         model=model,
@@ -599,37 +638,16 @@ class LangChainOrchestrator:
                         ),
                         components=[],
                         sources=[],
-                        tool_results=tool_results,
+                        tool_results={"property_profile": profile},
                     )
+
                 tool_results["property_content"] = review_results
                 sources.extend(self._sources_from_retrieval(review_results))
-            elif is_unknown_fact_query:
-                evidence_results = self._filter_matching_evidence_results(
-                    message,
-                    retrieval_results,
-                    require_complete_match=True,
-                    min_confidence=MIN_RETRIEVAL_CONFIDENCE,
-                )
-                tool_results["property_content"] = evidence_results
-                sources.extend(self._sources_from_retrieval(evidence_results))
-                if not evidence_results:
-                    return ChatResponse(
-                        property_code=normalized_code,
-                        model=model,
-                        answer_markdown=self._with_scope_note(
-                            self._no_matching_website_evidence_answer(
-                                profile,
-                                normalized_code,
-                            ),
-                            scope_note,
-                        ),
-                        components=[],
-                        sources=[],
-                        tool_results=tool_results,
-                    )
+
             else:
                 tool_results["property_content"] = retrieval_results
                 sources.extend(self._sources_from_retrieval(retrieval_results))
+
                 if (
                     not wants_structured
                     and self._requires_grounded_retrieval_answer(message, intent)
@@ -660,8 +678,10 @@ class LangChainOrchestrator:
             intent=intent,
             on_token=on_token,
         )
+
         if scope_note:
             answer_markdown = self._remove_scope_boilerplate(answer_markdown)
+
         if any(component.type == "table" for component in components):
             answer_markdown = self._remove_markdown_tables(answer_markdown)
 
@@ -718,85 +738,204 @@ class LangChainOrchestrator:
                 )
             )
 
-        if self._wants_charge_breakdown(text, intent):
-            charges = self._call_tool("get_charge_breakdown", property_code=property_code, limit=10)
-            tool_results["charge_breakdown"] = charges
-            components.append(
-                UIComponent(
-                    type="bar_chart",
-                    title="Charge Breakdown",
-                    data=[
-                        {
-                            "label": row["charge_code"],
-                            "value": row["amount"],
-                            "unit": "USD",
-                        }
-                        for row in charges
-                    ],
+    def _collect_structured_from_plan(
+        self,
+        property_code: str,
+        message: str,
+        tool_results: dict[str, Any],
+        components: list[UIComponent],
+        structured_tools: list[StructuredToolCall],
+        intent: str | None = None,
+    ) -> None:
+        text = message.lower()
+
+        for tool_call in structured_tools:
+            name = tool_call.name
+            args = dict(getattr(tool_call, "args", {}) or {})
+            args.pop("property_code", None)
+
+            if name == "get_property_profile":
+                tool_results["property_profile"] = self._call_tool(
+                    "get_property_profile",
+                    property_code=property_code,
                 )
-            )
+                continue
 
-        if intent == "top_balances" or "balance" in text:
-            balances = self._call_tool("get_top_balances", property_code=property_code, limit=10)
-            tool_results["top_balances"] = balances
-            components.append(
-                UIComponent(type="table", title="Top Balances", data=balances)
-            )
+            if name == "get_latest_property_kpis":
+                latest_kpis = tool_results.get("latest_kpis")
+                if latest_kpis is None:
+                    latest_kpis = self._call_tool(
+                        "get_latest_property_kpis",
+                        property_code=property_code,
+                    )
+                    tool_results["latest_kpis"] = latest_kpis
 
-        if self._wants_vacant_unit_detail(text, intent):
-            vacant_units = self._call_tool(
-                "get_vacant_units", property_code=property_code, limit=20
-            )
-            vacant_units = self._with_bedroom_categories(vacant_units)
-            tool_results["vacant_units"] = vacant_units
-            components.append(
-                UIComponent(type="table", title="Vacant Units", data=vacant_units)
-            )
+                if self._wants_kpi_cards(text, intent):
+                    self._add_kpi_components(latest_kpis, components)
 
-        if self._wants_rent_by_unit_type(text, intent):
-            rent_by_type = self._call_tool("get_rent_by_unit_type", property_code=property_code)
-            tool_results["rent_by_unit_type"] = rent_by_type
-            rent_by_bedroom = self._rent_by_bedroom_category(rent_by_type)
-            if rent_by_bedroom:
-                tool_results["rent_by_bedroom_category"] = rent_by_bedroom
+                if self._wants_rent_lease_comparison(text, intent):
+                    comparison = self._rent_lease_comparison(latest_kpis)
+                    if comparison:
+                        tool_results["rent_lease_comparison"] = comparison
+                        components.append(
+                            UIComponent(
+                                type="comparison_view",
+                                title="Market Rent vs Lease Charges",
+                                data=comparison["items"],
+                            )
+                        )
+
+                continue
+
+            if name == "get_occupancy_trend":
+                months = int(args.get("months") or 12)
+                months = max(1, min(36, months))
+
+                trend = self._call_tool(
+                    "get_occupancy_trend",
+                    property_code=property_code,
+                    months=months,
+                )
+                tool_results["occupancy_trend"] = trend
+                components.append(
+                    UIComponent(
+                        type="line_chart",
+                        title="Occupancy Trend",
+                        data=[
+                            {
+                                "label": row["report_month"],
+                                "value": row["unit_occupancy_pct"],
+                                "unit": "%",
+                            }
+                            for row in trend
+                        ],
+                    )
+                )
+                continue
+
+            if name == "get_charge_breakdown":
+                limit = int(args.get("limit") or 10)
+                limit = max(1, min(50, limit))
+
+                charges = self._call_tool(
+                    "get_charge_breakdown",
+                    property_code=property_code,
+                    limit=limit,
+                )
+                tool_results["charge_breakdown"] = charges
                 components.append(
                     UIComponent(
                         type="bar_chart",
-                        title="Average Market Rent by Bedroom Category",
+                        title="Charge Breakdown",
+                        data=[
+                            {
+                                "label": row["charge_code"],
+                                "value": row["amount"],
+                                "unit": "USD",
+                            }
+                            for row in charges
+                        ],
+                    )
+                )
+                continue
+
+            if name == "get_top_balances":
+                limit = int(args.get("limit") or 10)
+                limit = max(1, min(50, limit))
+
+                balances = self._call_tool(
+                    "get_top_balances",
+                    property_code=property_code,
+                    limit=limit,
+                )
+                tool_results["top_balances"] = balances
+                components.append(
+                    UIComponent(
+                        type="table",
+                        title="Top Balances",
+                        data=balances,
+                    )
+                )
+                continue
+
+            if name == "get_vacant_units":
+                limit = int(args.get("limit") or 20)
+                limit = max(1, min(50, limit))
+
+                vacant_units = self._call_tool(
+                    "get_vacant_units",
+                    property_code=property_code,
+                    limit=limit,
+                )
+                vacant_units = self._with_bedroom_categories(vacant_units)
+                tool_results["vacant_units"] = vacant_units
+                components.append(
+                    UIComponent(
+                        type="table",
+                        title="Vacant Units",
+                        data=vacant_units,
+                    )
+                )
+                continue
+
+            if name == "get_rent_by_unit_type":
+                rent_by_type = self._call_tool(
+                    "get_rent_by_unit_type",
+                    property_code=property_code,
+                )
+                tool_results["rent_by_unit_type"] = rent_by_type
+
+                rent_by_bedroom = self._rent_by_bedroom_category(rent_by_type)
+                if rent_by_bedroom:
+                    tool_results["rent_by_bedroom_category"] = rent_by_bedroom
+                    components.append(
+                        UIComponent(
+                            type="bar_chart",
+                            title="Average Market Rent by Bedroom Category",
+                            description=(
+                                "Each bar shows the average monthly market rent in USD, "
+                                "grouped from recognizable rent-roll unit type codes."
+                            ),
+                            data=[
+                                {
+                                    "label": row["bedroom_category"],
+                                    "value": row["avg_market_rent"],
+                                    "unit": "USD",
+                                    "unit_count": row["unit_count"],
+                                }
+                                for row in rent_by_bedroom
+                            ],
+                        )
+                    )
+
+                components.append(
+                    UIComponent(
+                        type="bar_chart",
+                        title="Average Market Rent by Floorplan Code",
                         description=(
-                            "Each bar shows the average monthly market rent in USD, "
-                            "grouped from recognizable rent-roll unit type codes."
+                            "Each bar shows the average monthly market rent in USD for a "
+                            "specific rent-roll unit type or floorplan code."
                         ),
                         data=[
                             {
-                                "label": row["bedroom_category"],
+                                "label": row["unit_type"],
                                 "value": row["avg_market_rent"],
                                 "unit": "USD",
                                 "unit_count": row["unit_count"],
                             }
-                            for row in rent_by_bedroom
+                            for row in rent_by_type
                         ],
                     )
                 )
-            components.append(
-                UIComponent(
-                    type="bar_chart",
-                    title="Average Market Rent by Floorplan Code",
-                    description=(
-                        "Each bar shows the average monthly market rent in USD for a "
-                        "specific rent-roll unit type or floorplan code."
-                    ),
-                    data=[
-                        {
-                            "label": row["unit_type"],
-                            "value": row["avg_market_rent"],
-                            "unit": "USD",
-                            "unit_count": row["unit_count"],
-                        }
-                        for row in rent_by_type
-                    ],
-                )
-            )
+                continue
+
+            if name == "get_report_periods":
+                if "report_periods" not in tool_results:
+                    tool_results["report_periods"] = self._call_tool(
+                        "get_report_periods",
+                        property_code=property_code,
+                    )
+                continue
 
     def _generate_answer(
         self,
@@ -1004,102 +1143,6 @@ class LangChainOrchestrator:
             prompt_components.append(summary)
         return prompt_components
 
-    def _llm_intent_fallback(
-        self,
-        provider: str,
-        model_name: str,
-        message: str,
-    ) -> str | None:
-        try:
-            chat_model = self._chat_model(provider, model_name)
-            response = chat_model.invoke(
-                [
-                    SystemMessage(
-                        content=(
-                            "Classify the user's property assistant request. Return only "
-                            "valid JSON with one key, intent. Allowed values: "
-                            "latest_kpis, executive_summary, occupancy_trend, "
-                            "charge_breakdown, rent_lease_comparison, vacant_units, "
-                            "top_balances, rent_by_unit_type, amenity_list, floorplans, "
-                            "gallery, location, website_content, clarify, unknown. "
-                            "Use website_content for factual property/website questions "
-                            "that do not need rent-roll data."
-                        )
-                    ),
-                    HumanMessage(content=message),
-                ]
-            )
-            content = str(response.content).strip()
-            if not content.startswith("{"):
-                match = re.search(r"\{.*\}", content, re.DOTALL)
-                content = match.group(0) if match else content
-            payload = json.loads(content)
-        except Exception:
-            return None
-
-        intent = payload.get("intent")
-        allowed = STRUCTURED_INTENTS | RETRIEVAL_INTENTS | {"clarify"}
-        if intent == "clarify":
-            return None
-        if intent in allowed:
-            return str(intent)
-        return None
-
-    def _llm_plan(self, message: str, provider: str, model_name: str) -> LlmPlan | None:
-        tools = sorted(self.tools.values(), key=lambda tool: tool.name)
-        tool_descriptions = "\n".join(
-            f"- {tool.name}: {tool.description or 'No description'}"
-            for tool in tools
-        )
-        system_prompt = (
-            "You are a tool planner for a property assistant. Return only valid JSON. "
-            "You must classify the user query into one route and suggest tool names.\n\n"
-            "Allowed routes: structured, retrieval, hybrid, unsupported, clarification.\n"
-            "Rules:\n"
-            "- Use structured when MySQL rent-roll tools can answer the question.\n"
-            "- Use retrieval when website content is needed (amenities, features, EV charging, parking).\n"
-            "- Use hybrid when both structured and website retrieval are needed.\n"
-            "- Use clarification for ambiguous requests such as 'compare this property'.\n"
-            "- Use unsupported for crime rate, public safety, or other data not in MySQL or scraped websites.\n"
-            "- Use unsupported for reviews unless reviews are explicitly present in the scraped website sample.\n"
-            "- Never include or infer property_code.\n"
-            "- Never output SQL.\n\n"
-            "Available tools:\n"
-            f"{tool_descriptions}\n\n"
-            "Return JSON with keys: route, tools, reason."
-        )
-
-        try:
-            response = self._chat_model(provider, model_name).invoke(
-                [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=f"User query: {message}"),
-                ]
-            )
-            content = str(response.content).strip()
-            if not content.startswith("{"):
-                match = re.search(r"\{.*\}", content, re.DOTALL)
-                content = match.group(0) if match else content
-            payload = json.loads(content)
-        except Exception:
-            return None
-
-        route = str(payload.get("route") or "").strip().lower()
-        if route not in LLM_PLAN_ROUTES:
-            return None
-        tools = payload.get("tools") or []
-        if not isinstance(tools, list):
-            return None
-        planned_tools = [str(tool).strip() for tool in tools if str(tool).strip()]
-        reason = str(payload.get("reason") or "").strip() or None
-        return LlmPlan(route=route, tools=planned_tools, reason=reason)
-
-    def _validate_planned_tools(self, planned_tools: list[str]) -> bool:
-        if not planned_tools:
-            return True
-        allowlist = set(self.tools)
-        return all(tool in allowlist for tool in planned_tools)
-
     @staticmethod
     def _is_unsupported_fact_question(message: str) -> bool:
         lowered = message.lower()
@@ -1114,165 +1157,15 @@ class LangChainOrchestrator:
             "is outside those sources."
         )
 
-    def _sql_approval_proposal_response(
-        self,
-        provider: str,
-        model_name: str,
-        property_code: str,
-        profile: dict,
-        message: str,
-        unsupported_metric: str,
-        tool_results: dict[str, Any],
-    ) -> ChatResponse | None:
-        proposal = self._propose_sql(
-            provider=provider,
-            model_name=model_name,
-            property_code=property_code,
-            message=message,
-            unsupported_metric=unsupported_metric,
+    @staticmethod
+    def _sql_approval_unavailable_answer(profile: dict, property_code: str) -> str:
+        return (
+            f"### {profile['property_name']} (`{property_code}`)\n\n"
+            "I can't prepare a safe custom query for that request. I can still help with "
+            "supported views like latest occupancy, occupancy trend, charge breakdown, "
+            "top balances, vacant units, average market rent by unit type, and market "
+            "rent vs lease charges."
         )
-        if not proposal:
-            return None
-
-        validation = validate_read_only_sql(proposal["sql"], property_code)
-        if not validation.ok or not validation.sql:
-            tool_results["sql_proposal_error"] = validation.error
-            return None
-
-        component = UIComponent(
-            type="sql_approval",
-            title="Review Proposed SQL",
-            description=(
-                "This query was drafted for a metric that is not covered by a "
-                "prebuilt analytics tool. Review it before running."
-            ),
-            data={
-                "sql": validation.sql,
-                "question": message,
-                "property_code": property_code,
-                "model": f"{provider}:{model_name}",
-                "explanation": proposal.get("explanation")
-                or f"Proposed query for {unsupported_metric}.",
-            },
-        )
-        tool_results["pending_sql_proposal"] = component.data
-        return ChatResponse(
-            property_code=property_code,
-            model=f"{provider}:{model_name}",
-            answer_markdown=(
-                f"### {profile['property_name']} (`{property_code}`)\n\n"
-                f"I don't have a prebuilt analytics tool for **{unsupported_metric}** yet, "
-                "but I drafted a read-only SQL query for review. Please approve it before "
-                "running the query."
-            ),
-            components=[component],
-            sources=[],
-            tool_results=tool_results,
-        )
-
-    def _propose_sql(
-        self,
-        provider: str,
-        model_name: str,
-        property_code: str,
-        message: str,
-        unsupported_metric: str | None = None,
-    ) -> dict[str, str] | None:
-        system_prompt = (
-            "You draft read-only MySQL SELECT queries for a property analytics assistant. "
-            "Return only valid JSON with keys sql and explanation. The backend will "
-            "validate the SQL before showing it to the user for approval.\n\n"
-            "Hard rules:\n"
-            "- Generate exactly one read-only SELECT statement.\n"
-            "- Use only these tables: properties, rent_roll_reports, rent_roll_units, "
-            "lease_charges, rent_roll_summary_groups, rent_roll_charge_summary.\n"
-            f"- The active property_code is '{property_code}'.\n"
-            "- Every table referenced in FROM or JOIN must be explicitly scoped by "
-            f"that table alias: alias.property_code = '{property_code}'.\n"
-            "- In subqueries, every table alias must also be explicitly scoped by "
-            f"property_code = '{property_code}'.\n"
-            "- For a single-table query, an unqualified property_code filter is allowed, "
-            "but alias.property_code is preferred.\n"
-            "- Include LIMIT 100 or less unless the query is a single aggregate row.\n"
-            "- Do not use INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, SET, USE, CALL, "
-            "stored procedures, temporary tables, comments, CTEs, or multiple statements.\n\n"
-            "Schema:\n"
-            "- properties(property_code, property_name, address, source_site)\n"
-            "- rent_roll_reports(id, property_code, report_month, as_of_date, source_filename)\n"
-            "- rent_roll_units(id, report_id, property_code, resident_group, unit, unit_type, "
-            "sqft, resident_status, market_rent, resident_deposit, other_deposit, "
-            "move_in_date, lease_expiration_date, move_out_date, balance)\n"
-            "- lease_charges(id, rent_roll_unit_id, report_id, property_code, charge_code, amount)\n"
-            "- rent_roll_summary_groups(id, report_id, property_code, group_name, "
-            "square_footage, market_rent, lease_charges, security_deposit, other_deposits, "
-            "unit_count, unit_occupancy_pct, sqft_occupied_pct, balance)\n"
-            "- rent_roll_charge_summary(id, report_id, property_code, charge_code, amount)\n\n"
-            "Latest-month pattern:\n"
-            "- For current/latest unit-level questions, join rent_roll_reports r on "
-            "r.id = u.report_id, filter u.property_code and r.property_code, and filter "
-            "r.report_month to a subquery selecting MAX(r2.report_month) from "
-            "rent_roll_reports r2 where r2.property_code is the active property.\n"
-            "- For latest charge summaries, join rent_roll_reports r on r.id = cs.report_id "
-            "and use the same MAX(report_month) pattern.\n"
-            "- For latest property KPI summaries, join rent_roll_reports r on "
-            "r.id = sg.report_id and use the same MAX(report_month) pattern.\n\n"
-            "Examples of valid scoping:\n"
-            f"SELECT u.unit FROM rent_roll_units u WHERE u.property_code = '{property_code}' LIMIT 10\n"
-            f"SELECT u.unit, r.report_month FROM rent_roll_units u JOIN rent_roll_reports r "
-            f"ON r.id = u.report_id WHERE u.property_code = '{property_code}' "
-            f"AND r.property_code = '{property_code}' LIMIT 10"
-        )
-        chat_model = self._chat_model(provider, model_name)
-        prompt = (
-            f"User question: {message}\n"
-            f"Requested unsupported metric label: {unsupported_metric or 'not provided'}\n\n"
-            "Draft the safest SQL that answers the user question from the schema. "
-            "If the question asks for a specific month/year, include that filter. "
-            "If it asks for current/latest data, use the latest-month pattern."
-        )
-        last_error: str | None = None
-        last_sql: str | None = None
-
-        for attempt in range(3):
-            try:
-                human_content = prompt
-                if last_error and last_sql:
-                    human_content = (
-                        f"The previous SQL failed validation:\n{last_sql}\n\n"
-                        f"Validation error: {last_error}\n\n"
-                        "Repair the SQL so it follows every hard rule. Return only JSON "
-                        "with keys sql and explanation."
-                    )
-                response = chat_model.invoke(
-                    [
-                        SystemMessage(content=system_prompt),
-                        HumanMessage(content=human_content),
-                    ]
-                )
-                content = str(response.content).strip()
-                if not content.startswith("{"):
-                    match = re.search(r"\{.*\}", content, re.DOTALL)
-                    content = match.group(0) if match else content
-                payload = json.loads(content)
-            except Exception:
-                return None
-
-            sql = str(payload.get("sql") or "").strip()
-            explanation = str(payload.get("explanation") or "").strip()
-            if not sql:
-                return None
-
-            validation = validate_read_only_sql(sql, property_code)
-            if validation.ok and validation.sql:
-                return {
-                    "sql": validation.sql,
-                    "explanation": explanation,
-                }
-
-            last_sql = sql
-            last_error = validation.error or "The SQL did not pass validation."
-
-        return None
 
     def _mock_answer(
         self,
@@ -1368,10 +1261,8 @@ class LangChainOrchestrator:
                     fallback_evidence.append(item)
 
             evidence = matched_evidence or fallback_evidence
-            if self._is_yes_no_question(message) and matched_evidence:
-                lines.append(
-                    self._yes_no_retrieval_answer(matched_terms, evidence)
-                )
+            if matched_evidence:
+                lines.append(self._natural_retrieval_fact_answer(message, evidence))
             elif self._is_yes_no_question(message):
                 lines.append(
                     "I don't see matching website evidence for that in the selected "
@@ -2382,6 +2273,54 @@ class LangChainOrchestrator:
         else:
             intro = "Yes. The selected property's website lists a matching feature."
         return intro + "\n\n" + "\n".join(details)
+
+    def _natural_retrieval_fact_answer(
+        self,
+        message: str,
+        evidence: list[dict[str, str]],
+    ) -> str:
+        if not evidence:
+            return "I don't see matching website evidence for that in the selected property sample."
+
+        text = message.lower()
+        first = evidence[0]
+        snippet = self._clean_snippet_spacing(first.get("snippet", ""))
+        section = first.get("section", "Website Evidence")
+
+        if "parking" in text:
+            return (
+                "Yes, the property website mentions parking. "
+                f"Specifically, it lists **{snippet}** under **{section}**."
+            )
+
+        if "ev" in text or "charging" in text or "electric" in text:
+            return (
+                "Yes, the property website mentions EV/electric-vehicle related amenities. "
+                f"Specifically, it lists **{snippet}** under **{section}**."
+            )
+
+        if "bike" in text or "storage" in text:
+            return (
+                "Yes, the property website mentions bike/storage related amenities. "
+                f"Specifically, it lists **{snippet}** under **{section}**."
+            )
+
+        if "pet" in text:
+            return (
+                "Yes, the property website mentions pet-related information. "
+                f"Specifically, it lists **{snippet}** under **{section}**."
+            )
+
+        return (
+            "The property website has matching evidence: "
+            f"**{snippet}** under **{section}**."
+        )
+
+    @staticmethod
+    def _clean_snippet_spacing(text: str) -> str:
+        text = re.sub(r"\bC ar\b", "Car", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
 
     @staticmethod
     def _website_evidence_answer(evidence: list[dict[str, str]]) -> str:

@@ -15,7 +15,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 - Markdown answers with source citations.
 - Streamed responses for real LLM calls.
 - Embedded UI components for KPIs, trends, charge breakdowns, vacant units, balances, and comparisons.
-- SQL review workflow for LLM-drafted, read-only analytics queries that are not covered by prebuilt tools.
+- LLM-assisted tool planning with backend validation and server-side `property_code` injection.
 - Golden dataset and evaluation scripts for retrieval and answer quality.
 
 ## Project Structure

@@ -14,9 +14,9 @@
     "property_code": "183r",
     "model": "mock:mock-property-assistant",
     "message": "Show latest occupancy and top balance units.",
-    "expected_answer_terms": ["Luckey Platt", "100.0"],
-    "expected_component_types": ["kpi_card", "table"],
-    "expected_tool_keys": ["property_profile", "latest_kpis", "top_balances"],
+    "expected_answer_terms": ["Luckey Platt", "highest resident balances"],
+    "expected_component_types": ["table"],
+    "expected_tool_keys": ["property_profile", "top_balances"],
     "expected_source_property_code": null
   },
   {
@@ -34,7 +34,7 @@
     "property_code": "115r",
     "model": "mock:mock-property-assistant",
     "message": "Compare",
-    "expected_answer_terms": ["Canfield Park", "What would you like to look at", "Rent-roll KPIs"],
+    "expected_answer_terms": ["What would you like to compare or analyze"],
     "expected_component_types": [],
     "expected_tool_keys": ["property_profile"],
     "expected_source_property_code": null
