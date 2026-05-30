@@ -289,33 +289,14 @@ def test_sql_approval_response_returns_pending_card_without_execution(
             self.content = content
 
     class FakeChatModel:
-        def __init__(self) -> None:
-            self.calls = 0
-
         def invoke(self, messages):
-            self.calls += 1
-            if self.calls == 1:
-                return FakeResponse(
-                    json.dumps(
-                        {
-                            "route": "sql_approval",
-                            "structured_tools": [],
-                            "retrieval_queries": [],
-                            "unsupported_reason": None,
-                            "clarification_question": None,
-                            "sql_request": (
-                                "Count units grouped by unit_type for the active property "
-                                "and latest report month."
-                            ),
-                            "confidence": 0.9,
-                        }
-                    )
-                )
             return FakeResponse(
                 json.dumps(
                     {
+                        "answerable": True,
+                        "unavailable_reason": None,
                         "sql": (
-                            "SELECT u.unit_type, COUNT(*) AS unit_count "
+                            "SELECT u.unit_type, u.resident_status, COUNT(*) AS unit_count "
                             "FROM rent_roll_units u "
                             "JOIN rent_roll_reports r ON r.id = u.report_id "
                             "WHERE u.property_code = :property_code "
@@ -325,10 +306,14 @@ def test_sql_approval_response_returns_pending_card_without_execution(
                             "FROM rent_roll_reports r2 "
                             "WHERE r2.property_code = :property_code"
                             ") "
-                            "GROUP BY u.unit_type "
-                            "LIMIT 50"
+                            "AND u.resident_status IN ('Current', 'Notice', 'Future', 'Vacant') "
+                            "GROUP BY u.unit_type, u.resident_status "
+                            "ORDER BY u.unit_type, u.resident_status"
                         ),
-                        "explanation": "Counts units by unit type for the latest report month.",
+                        "explanation": (
+                            "Counts occupied and vacant units grouped by unit type "
+                            "for the latest report month."
+                        ),
                         "parameters": {"property_code": "placeholder"},
                         "safety_notes": ["Read-only SELECT", "Scoped to active property"],
                     }
@@ -348,19 +333,81 @@ def test_sql_approval_response_returns_pending_card_without_execution(
         json={
             "property_code": "115r",
             "model": "anthropic:claude-haiku-4-5-20251001",
-            "message": "How many units are there by unit type?",
+            "message": "Count occupied and vacant units by unit type.",
         },
     )
 
     assert response.status_code == 200
     body = response.json()
+
     assert body["sources"] == []
     assert [component["type"] for component in body["components"]] == ["sql_approval"]
     assert body["components"][0]["data"]["status"] == "pending_approval"
     assert body["components"][0]["data"]["parameters"] == {"property_code": "115r"}
+    assert "resident_status" in body["components"][0]["data"]["sql"]
     assert "sql_draft" in body["tool_results"]
     assert "latest_kpis" not in body["tool_results"]
 
+def test_top_market_rents_routes_to_sql_approval(
+    mysql_db,
+    hybrid_retriever,
+    monkeypatch,
+) -> None:
+    class FakeResponse:
+        def __init__(self, content: str) -> None:
+            self.content = content
+
+    class FakeChatModel:
+        def invoke(self, messages):
+            return FakeResponse(
+                json.dumps(
+                    {
+                        "answerable": True,
+                        "unavailable_reason": None,
+                        "sql": (
+                            "SELECT u.unit, u.unit_type, u.market_rent "
+                            "FROM rent_roll_units u "
+                            "JOIN rent_roll_reports r ON r.id = u.report_id "
+                            "WHERE u.property_code = :property_code "
+                            "AND r.property_code = :property_code "
+                            "AND r.report_month = ("
+                            "SELECT MAX(r2.report_month) "
+                            "FROM rent_roll_reports r2 "
+                            "WHERE r2.property_code = :property_code"
+                            ") "
+                            "ORDER BY u.market_rent DESC "
+                            "LIMIT 10"
+                        ),
+                        "explanation": "Ranks units by market rent for the latest report month.",
+                        "parameters": {"property_code": "placeholder"},
+                        "safety_notes": ["Read-only SELECT", "Scoped to active property"],
+                    }
+                )
+            )
+
+    monkeypatch.setattr(
+        LangChainOrchestrator,
+        "_chat_model",
+        lambda self, provider, model_name: FakeChatModel(),
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/chat",
+        json={
+            "property_code": "115r",
+            "model": "anthropic:claude-haiku-4-5-20251001",
+            "message": "Give me the top 10 market rents for this property.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["sources"] == []
+    assert [component["type"] for component in body["components"]] == ["sql_approval"]
+    assert body["components"][0]["data"]["status"] == "pending_approval"
+    assert "market_rent" in body["components"][0]["data"]["sql"]
 
 def test_compare_property_prompts_for_clarification(mysql_db, hybrid_retriever) -> None:
     client = TestClient(app)
@@ -711,8 +758,7 @@ def test_rent_by_unit_type_explains_bedroom_categories_and_floorplan_codes(
     [
         "What is the average balance by bedroom category for this property?",
         "Which bedroom category has the highest vacancy rate?",
-        "Show median lease charges by unit type.",
-        "Give me the top 10 market rents for this property.",
+        "Show median lease charges by unit type."
     ],
 )
 def test_unsupported_structured_aggregates_do_not_use_partial_tool_results(
@@ -738,7 +784,11 @@ def test_unsupported_structured_aggregates_do_not_use_partial_tool_results(
     if "vacancy rate" in message.lower():
         assert "what would you like to look at" in answer.lower()
     else:
-        assert "can't calculate" in answer.lower()
+        assert (
+            "can't calculate" in answer.lower()
+            or "can't prepare a safe custom query" in answer.lower()
+            or "not answerable from the current mysql schema" in answer.lower()
+        )
     assert body["components"] == []
     assert body["sources"] == []
     assert set(body["tool_results"]) == {"property_profile"}

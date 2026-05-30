@@ -16,6 +16,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 - Streamed responses for real LLM calls.
 - Embedded UI components for KPIs, trends, charge breakdowns, vacant units, balances, and comparisons.
 - LLM-assisted tool planning with backend validation and server-side `property_code` injection.
+- Safe SQL approval workflow for custom structured rent-roll questions not covered by predefined tools.
 - Golden dataset and evaluation scripts for retrieval and answer quality.
 
 ## Project Structure
@@ -211,21 +212,24 @@ flowchart LR
 
 1. The user selects a property in the React UI.
 2. The frontend sends `property_code`, selected `model`, and the user message to FastAPI.
-3. The backend runs a deterministic router (rules + local embeddings) and, for real models, an LLM planner that proposes a route (structured, retrieval, hybrid, clarification, unsupported) plus tool names.
-4. Tool names are validated against the allowlist; property scoping is enforced server-side.
-5. For structured analytics, the orchestrator checks a metric capability registry before tool execution.
-6. Supported metrics are routed to bounded tools.
-7. For unsupported structured metrics, the LLM may draft a read-only SQL query instead of guessing from partial data.
-8. The backend validates SQL drafts before they reach the UI. The guard allows only a single `SELECT`, approved tables, explicit active-property filters for every referenced table, and a bounded `LIMIT`.
-9. Valid SQL drafts are shown in the UI for user approval before execution.
-10. Approved SQL is executed only after the user clicks the approval control.
-11. Every structured SQL query is filtered by active `property_code`.
-12. Every retrieval query is filtered by active `property_code` metadata.
-13. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
-14. Retrieved chunks are annotated with evidence confidence before being passed to the LLM.
-15. The LLM receives scoped tool results, retrieval evidence, component JSON, and guardrails.
-16. The API returns Markdown, sources, tool results, and structured UI component definitions.
-17. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
+3. The backend loads the selected property profile and normalizes the active `property_code`.
+4. The orchestrator creates `LLMToolPlanner`. The planner first applies deterministic guardrails for ambiguity, PII, unsafe SQL, unsupported external data, and cross-property requests.
+5. For real LLM models, the planner can classify the request as `structured`, `retrieval`, `hybrid`, `sql_approval`, `unsupported`, or `clarification`.
+6. If the LLM planner cannot return a valid plan, or if the mock model is used in tests, the system falls back to deterministic planning.
+7. Tool names are validated against an allowlist; property scoping is injected server-side, never trusted from the LLM.
+8. Common structured analytics are routed to bounded SQL-backed tools such as latest KPIs, occupancy trend, charge breakdown, top balances, vacant units, rent by unit type, and rent vs lease charges.
+9. Website questions are routed to property-scoped retrieval over scraped website chunks.
+10. Custom structured metrics that are not covered by predefined tools can route to `sql_approval`.
+11. In `sql_approval`, the LLM drafts a read-only SQL query with `:property_code`; it does not execute SQL.
+12. The backend validates SQL drafts before they reach the UI. The guard checks allowed tables and columns, blocks PII, blocks unsafe operations, requires active-property scoping, rejects comments/semicolons/UNION, and requires row limits for row-level queries.
+13. Valid SQL drafts are shown in the UI for user approval before execution.
+14. Approved SQL is executed only through the backend approval endpoint, which binds the active `property_code` server-side.
+15. Every structured SQL query is filtered by active `property_code`.
+16. Every retrieval query is filtered by active `property_code` metadata.
+17. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
+18. Retrieved chunks are annotated with evidence confidence before being used in the answer.
+19. The API returns Markdown, sources, tool results, and structured UI component definitions.
+20. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
 
 ## Design Decisions
 
@@ -235,11 +239,11 @@ The public website content is treated as unstructured data and ingested into a r
 
 Hybrid retrieval was chosen over vector-only retrieval because property websites contain exact terms such as `EV charging`, `A07`, `bike storage`, and charge/floorplan labels. BM25 helps exact-match queries, while Chroma handles paraphrases. Reciprocal rank fusion combines both without adding a heavy search dependency.
 
-The orchestrator does not let the LLM freely choose arbitrary tools. Instead, the backend routes intent and calls bounded tools itself. This keeps property scoping enforceable end-to-end and makes responses more predictable during a demo.
+The orchestrator does not let the LLM execute arbitrary actions. The LLM can help plan the route and draft SQL for approval, but the backend validates the plan, validates tool names, injects property scope, and controls execution.
 
-Structured analytics also pass through a lightweight capability registry. The registry documents which metric families are supported by complete, validated tools, such as latest KPIs, occupancy trend, top balances, vacant units, charge breakdown, and average market rent by unit type. If a user asks for an unsupported aggregate, such as average balance by bedroom category or median lease charges by unit type, the assistant does not compute it from a related partial result. It returns a limitation message and suggests supported views.
+Structured analytics first use predefined SQL-backed tools for common metrics, such as latest KPIs, occupancy trend, top balances, vacant units, charge breakdown, and average market rent by unit type. These are preferred because they are tested and scoped by design.
 
-For real LLMs, unsupported structured metrics can also enter a controlled SQL review workflow. The LLM drafts a candidate read-only query, but the backend does not execute it immediately. The SQL must pass validation for single-statement `SELECT` syntax, approved table names, active-property filtering, and row limits. Only after the user approves it in the UI does the backend execute the query and render the result as a table.
+For custom structured metrics, the planner can route to a controlled SQL approval workflow. The LLM drafts a candidate read-only query with a `:property_code` placeholder, but the backend does not execute it immediately. The draft must pass validation for approved tables and columns, active-property filtering, no PII fields, no unsafe operations, and row limits. Only after approval does the backend bind the active property code and execute the query.
 
 The LLM is used for natural-language synthesis, not as the source of truth. Numeric facts come from MySQL tools, website facts come from retrieved chunks, and UI components are generated from structured tool outputs.
 
@@ -254,6 +258,8 @@ Property scoping is enforced in multiple places:
 - Chroma and BM25 retrieval both filter by `property_code`.
 - LangChain tools require `property_code` as an input.
 - The orchestrator passes only active-property tool results to the LLM.
+- LLM-drafted SQL must use `:property_code`; the backend binds the active property code only after approval.
+- Cross-property or all-property requests are blocked before tool execution.
 - If the user mentions another property while a different property is selected, the assistant adds an inline scope note and still answers only for the selected property.
 
 ## Supported Query Types
@@ -268,7 +274,7 @@ Examples the assistant is designed to handle:
 - top balances
 - vacant units and bedroom categories
 - average market rent by bedroom category and floorplan code
-- unsupported structured aggregates, such as average balance by bedroom category, are detected and answered with a limitation rather than partial calculations
+- custom structured SQL approval questions, such as lowest market rents, unit counts by unit type, or total market rent by unit type
 - website amenities and apartment features
 - EV charging, bike storage, parking, and other website-supported facts
 - floorplans advertised on the website
@@ -284,6 +290,8 @@ Run the local test suite:
 ```bash
 uv run pytest
 ```
+
+Some integration-style tests are skipped unless MySQL and the representative test data are available locally.
 
 Run the golden retrieval and generation dataset:
 
@@ -309,7 +317,7 @@ Evaluation coverage includes:
 - answer relevancy
 - completeness
 - citation quality
-- deterministic routing and response behavior for supported queries
+- planner routing and response behavior for supported, unsupported, hybrid, and SQL approval queries
 
 ## Assumptions
 
@@ -324,9 +332,9 @@ Evaluation coverage includes:
 - Chroma is simple to run locally and good for a prototype, but it is not a managed production vector database.
 - BM25 is stored locally with SQLite, which is lightweight but not designed for large multi-tenant search workloads.
 - The included local retrieval indexes make demos faster, but they can also be rebuilt from source data.
-- Intent routing uses local rules and embeddings for reliability. This is more predictable than fully agentic tool calling, but it means new query families may require adding examples or rules.
+- Intent routing uses deterministic guardrails plus an LLM planner. This is safer than fully agentic tool calling, but new query families may still require examples, planner rules, or new predefined tools.
 - The LLM is not given unrestricted tool access. This reduces risk but makes the orchestration layer more explicit.
-- Structured analytics use curated SQL-backed tools for known metrics and a guarded SQL approval workflow for unsupported metrics. This improves safety, testability, and property scoping, but it is less automatic than unrestricted agentic SQL execution.
+- Structured analytics use curated SQL-backed tools for known metrics and a guarded SQL approval workflow for custom metrics. This improves safety, testability, and property scoping, but it is less automatic than unrestricted agentic SQL execution.
 - The frontend renders a curated set of UI components rather than arbitrary LLM-generated HTML, which is safer but less flexible.
 
 ## Limitations
@@ -338,9 +346,9 @@ Evaluation coverage includes:
 - The prototype is designed for local development, not production deployment.
 - There is no authentication or multi-user authorization layer.
 - MySQL must be running and loaded before structured-data questions will work.
-- The assistant does not execute arbitrary database metrics automatically. Unsupported structured metrics can produce a proposed read-only SQL query, but the user must approve it before execution.
-- The SQL approval guard is intentionally strict. Complex valid SQL may be rejected if it cannot prove every referenced table is explicitly scoped to the active property.
-- The capability registry catches common unsupported aggregate patterns, but it is not a complete natural-language SQL planner. New metric families such as renewal trends, bad debt percentage, lease expirations, or move-in/move-out analytics would still benefit from new catalog entries and validated tools.
+- The assistant does not execute custom database metrics automatically. Custom structured metrics can produce a proposed read-only SQL query, but the user must approve it before execution.
+- The SQL approval guard is intentionally strict. Complex valid SQL may be rejected if it cannot prove every referenced table is scoped to the active property or if it references columns outside the allowlist.
+- The SQL approval route improves flexibility, but production-grade analytics would still benefit from a formal metric catalog and more validated tools for metric families such as renewal trends, bad debt percentage, lease expirations, or move-in/move-out analytics.
 - If retrieval indexes are deleted, run `scripts/ingest_unstructured.py` again before testing website questions.
 
 ## Packaging Notes

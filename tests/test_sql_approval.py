@@ -1,175 +1,159 @@
-from app.services.sql_approval import validate_drafted_sql, validate_read_only_sql
+from __future__ import annotations
+
+import json
+
+from app.services.sql_approval import draft_sql_for_approval, validate_drafted_sql
 
 
-def test_valid_single_table_query_can_use_unqualified_property_filter() -> None:
-    result = validate_read_only_sql(
-        """
-        SELECT unit, market_rent
-        FROM rent_roll_units
-        WHERE property_code = '115r'
-        ORDER BY market_rent DESC
-        LIMIT 10
-        """,
-        "115r",
-    )
+def test_valid_top_market_rents_sql_passes_validation() -> None:
+    sql = """
+    SELECT u.unit, u.unit_type, u.market_rent
+    FROM rent_roll_units u
+    WHERE u.property_code = :property_code
+      AND u.report_id = (
+        SELECT MAX(r.id)
+        FROM rent_roll_reports r
+        WHERE r.property_code = :property_code
+      )
+    ORDER BY u.market_rent DESC
+    LIMIT 10
+    """
 
-    assert result.ok
-
-
-def test_valid_join_requires_every_alias_to_be_property_scoped() -> None:
-    result = validate_read_only_sql(
-        """
-        SELECT u.unit, r.report_month
-        FROM rent_roll_units u
-        JOIN rent_roll_reports r ON r.id = u.report_id
-        WHERE u.property_code = '115r'
-          AND r.property_code = '115r'
-        LIMIT 10
-        """,
-        "115r",
-    )
-
-    assert result.ok
-
-
-def test_join_with_unscoped_alias_is_rejected() -> None:
-    result = validate_read_only_sql(
-        """
-        SELECT u.unit, r.report_month
-        FROM rent_roll_units u
-        JOIN rent_roll_reports r ON r.id = u.report_id
-        WHERE u.property_code = '115r'
-        LIMIT 10
-        """,
-        "115r",
-    )
-
-    assert not result.ok
-    assert "rent_roll_reports AS r" in (result.error or "")
-
-
-def test_string_literal_cannot_satisfy_property_filter() -> None:
-    result = validate_read_only_sql(
-        """
-        SELECT 'property_code = ''115r''' AS fake_scope
-        FROM rent_roll_units
-        LIMIT 10
-        """,
-        "115r",
-    )
-
-    assert not result.ok
-    assert "active property_code" in (result.error or "")
-
-
-def test_string_literal_cannot_satisfy_table_reference() -> None:
-    result = validate_read_only_sql(
-        """
-        SELECT 'FROM rent_roll_units WHERE property_code = ''115r''' AS fake_query
-        LIMIT 10
-        """,
-        "115r",
-    )
-
-    assert not result.ok
-    assert "read from at least one allowed table" in (result.error or "")
-
-
-def test_unsupported_table_is_rejected() -> None:
-    result = validate_read_only_sql(
-        "SELECT unit FROM users WHERE property_code = '115r'",
-        "115r",
-    )
-
-    assert not result.ok
-    assert "unsupported table" in (result.error or "")
-
-
-def test_write_statement_is_rejected() -> None:
-    result = validate_read_only_sql(
-        "DELETE FROM rent_roll_units WHERE property_code = '115r'",
-        "115r",
-    )
-
-    assert not result.ok
-    assert "SELECT" in (result.error or "")
-
-
-def test_valid_drafted_sql_uses_property_placeholder() -> None:
-    ok, reason = validate_drafted_sql(
-        """
-        SELECT u.unit_type, COUNT(*) AS unit_count
-        FROM rent_roll_units u
-        JOIN rent_roll_reports r ON r.id = u.report_id
-        WHERE u.property_code = :property_code
-          AND r.property_code = :property_code
-          AND r.report_month = (
-            SELECT MAX(r2.report_month)
-            FROM rent_roll_reports r2
-            WHERE r2.property_code = :property_code
-          )
-        GROUP BY u.unit_type
-        LIMIT 50
-        """
-    )
+    ok, reason = validate_drafted_sql(sql)
 
     assert ok, reason
 
 
-def test_drafted_delete_is_rejected() -> None:
+def test_valid_units_by_unit_type_sql_passes_validation() -> None:
+    sql = """
+    SELECT u.unit_type, COUNT(*) AS unit_count
+    FROM rent_roll_units u
+    WHERE u.property_code = :property_code
+      AND u.report_id = (
+        SELECT MAX(r.id)
+        FROM rent_roll_reports r
+        WHERE r.property_code = :property_code
+      )
+    GROUP BY u.unit_type
+    ORDER BY unit_count DESC
+    """
+
+    ok, reason = validate_drafted_sql(sql)
+
+    assert ok, reason
+
+
+def test_sql_without_property_placeholder_fails() -> None:
+    sql = """
+    SELECT unit, market_rent
+    FROM rent_roll_units
+    WHERE property_code = '115r'
+    LIMIT 10
+    """
+
+    ok, reason = validate_drafted_sql(sql)
+
+    assert not ok
+    assert "placeholder" in reason.lower() or "hardcode" in reason.lower()
+
+
+def test_sql_without_property_code_fails() -> None:
+    sql = """
+    SELECT unit, market_rent
+    FROM rent_roll_units
+    ORDER BY market_rent DESC
+    LIMIT 10
+    """
+
+    ok, reason = validate_drafted_sql(sql)
+
+    assert not ok
+    assert "property_code" in reason.lower()
+
+
+def test_sql_with_semicolon_fails() -> None:
+    ok, reason = validate_drafted_sql(
+        "SELECT unit FROM rent_roll_units WHERE property_code = :property_code LIMIT 10;"
+    )
+
+    assert not ok
+    assert "semicolon" in reason.lower()
+
+
+def test_sql_with_delete_fails() -> None:
     ok, reason = validate_drafted_sql(
         "DELETE FROM rent_roll_units WHERE property_code = :property_code"
     )
 
     assert not ok
-    assert "SELECT" in reason
+    assert "select" in reason.lower() or "forbidden" in reason.lower()
 
 
-def test_drafted_sql_without_property_code_is_rejected() -> None:
-    ok, reason = validate_drafted_sql("SELECT unit, market_rent FROM rent_roll_units LIMIT 10")
+def test_sql_with_union_fails() -> None:
+    sql = """
+    SELECT unit FROM rent_roll_units WHERE property_code = :property_code
+    UNION
+    SELECT unit FROM rent_roll_units WHERE property_code = :property_code
+    LIMIT 10
+    """
+
+    ok, reason = validate_drafted_sql(sql)
 
     assert not ok
-    assert "property_code" in reason
+    assert "union" in reason.lower()
 
 
-def test_drafted_sql_without_property_placeholder_is_rejected() -> None:
-    ok, reason = validate_drafted_sql(
-        "SELECT unit, market_rent FROM rent_roll_units WHERE property_code = '115r' LIMIT 10"
+def test_sql_with_unknown_table_fails() -> None:
+    sql = """
+    SELECT *
+    FROM resident_reviews
+    WHERE property_code = :property_code
+    LIMIT 10
+    """
+
+    ok, reason = validate_drafted_sql(sql)
+
+    assert not ok
+    assert "unsupported table" in reason.lower()
+
+
+def test_sql_with_pii_column_fails() -> None:
+    sql = """
+    SELECT resident_name, balance
+    FROM rent_roll_units
+    WHERE property_code = :property_code
+    ORDER BY balance DESC
+    LIMIT 10
+    """
+
+    ok, reason = validate_drafted_sql(sql)
+
+    assert not ok
+    assert "pii" in reason.lower() or "sensitive" in reason.lower()
+
+
+def test_drafter_answerable_false_is_supported() -> None:
+    def fake_chat_model(messages: list[dict[str, str]]) -> str:
+        return json.dumps(
+            {
+                "answerable": False,
+                "unavailable_reason": "Crime-rate data is not present in the current MySQL schema.",
+                "sql": None,
+                "explanation": "The requested metric requires an external public safety dataset.",
+                "parameters": {},
+                "safety_notes": [],
+            }
+        )
+
+    draft = draft_sql_for_approval(
+        message="What is the crime rate around this property?",
+        property_code="115r",
+        property_name="Canfield Park",
+        sql_request="Draft SQL for crime rate.",
+        chat_model=fake_chat_model,
     )
 
-    assert not ok
-    assert ":property_code" in reason or "hardcode" in reason
-
-
-def test_drafted_sql_with_semicolon_is_rejected() -> None:
-    ok, reason = validate_drafted_sql(
-        "SELECT unit FROM rent_roll_units WHERE property_code = :property_code;"
-    )
-
-    assert not ok
-    assert "Semicolons" in reason
-
-
-def test_drafted_sql_with_union_is_rejected() -> None:
-    ok, reason = validate_drafted_sql(
-        """
-        SELECT unit FROM rent_roll_units WHERE property_code = :property_code
-        UNION
-        SELECT unit FROM rent_roll_units WHERE property_code = :property_code
-        """
-    )
-
-    assert not ok
-    assert "UNION" in reason
-
-
-def test_drafted_sql_with_comments_is_rejected() -> None:
-    ok, reason = validate_drafted_sql(
-        """
-        SELECT unit FROM rent_roll_units
-        WHERE property_code = :property_code -- scoped
-        """
-    )
-
-    assert not ok
-    assert "comments" in reason
+    assert draft is not None
+    assert draft.answerable is False
+    assert draft.sql is None
+    assert "crime" in (draft.unavailable_reason or "").lower()

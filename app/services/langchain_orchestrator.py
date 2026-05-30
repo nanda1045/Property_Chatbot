@@ -13,136 +13,20 @@ from langchain_openai import ChatOpenAI
 
 from app.core.config import Settings
 from app.schemas import ChatResponse, Source, UIComponent
-from app.services.intent_router import (
-    RETRIEVAL_INTENTS,
-    STRUCTURED_INTENTS,
-    get_intent_router,
-)
+from app.services.intent_router import get_intent_router
 from app.services.langchain_tools import build_langchain_tools
 from app.services.llm_tool_planner import (
+    UNSUPPORTED_FACT_TERMS,
     LLMToolPlanner,
-    RetrievalQuery,
     StructuredToolCall,
     ToolPlan,
-    UNSUPPORTED_FACT_TERMS,
     validate_tool_plan,
 )
 from app.services.sql_approval import draft_sql_for_approval, validate_drafted_sql
 
-STRUCTURED_TERMS = {
-    "occupancy",
-    "vacant",
-    "vacancy",
-    "rent",
-    "market",
-    "charge",
-    "charges",
-    "fee",
-    "fees",
-    "balance",
-    "balances",
-    "lease",
-    "kpi",
-    "summary",
-    "trend",
-    "revenue",
-}
-RETRIEVAL_TERMS = {
-    "amenity",
-    "amenities",
-    "address",
-    "floorplan",
-    "floorplans",
-    "floor plan",
-    "gallery",
-    "photo",
-    "image",
-    "located",
-    "location",
-    "pet",
-    "parking",
-    "neighborhood",
-    "website",
-    "tour",
-    "contact",
-    "fitness",
-    "pool",
-    "ev",
-    "feature",
-    "features",
-    "charging",
-    "bike",
-    "court",
-    "courts",
-    "dryer",
-    "pickleball",
-    "storage",
-    "washer",
-}
-REVIEW_TERMS = {
-    "review",
-    "reviews",
-    "rating",
-    "ratings",
-    "testimonial",
-    "testimonials",
-    "resident review",
-    "resident reviews",
-    "google review",
-    "google reviews",
-}
 REVIEW_RE = re.compile(r"\b(?:reviews?|ratings?|testimonials?)\b", re.IGNORECASE)
 EVIDENCE_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
 MIN_RETRIEVAL_CONFIDENCE = "medium"
-AMBIGUOUS_REQUESTS = {
-    "analyze",
-    "compare",
-    "details",
-    "give details",
-    "give me details",
-    "help",
-    "info",
-    "is it good",
-    "more",
-    "more details",
-    "show",
-    "show me",
-    "summarize",
-    "tell me more",
-    "what about it",
-    "what about this",
-}
-AMBIGUOUS_TOKENS = {
-    "about",
-    "analyze",
-    "compare",
-    "detail",
-    "details",
-    "give",
-    "good",
-    "help",
-    "info",
-    "it",
-    "me",
-    "more",
-    "show",
-    "summarize",
-    "that",
-    "this",
-}
-AMBIGUOUS_DOMAIN_REQUESTS = {
-    "balance",
-    "balances",
-    "charge",
-    "charges",
-    "fee",
-    "fees",
-    "lease",
-    "occupancy",
-    "rent",
-    "vacancy",
-    "vacant",
-}
 SUPPORTED_STRUCTURED_CAPABILITIES: dict[str, dict[str, Any]] = {
     "latest_kpis": {
         "tool": "get_latest_property_kpis",
@@ -509,6 +393,28 @@ class LangChainOrchestrator:
                     tool_results=tool_results,
                 )
 
+            tool_results["sql_draft"] = drafted.model_dump()
+
+            if drafted.answerable is False:
+                unavailable_reason = (
+                    drafted.unavailable_reason
+                    or "This question is not answerable from the current MySQL schema."
+                )
+                return ChatResponse(
+                    property_code=normalized_code,
+                    model=model,
+                    answer_markdown=self._with_scope_note(
+                        (
+                            f"### {profile['property_name']} (`{normalized_code}`)\n\n"
+                            f"{unavailable_reason}"
+                        ),
+                        scope_note,
+                    ),
+                    components=[],
+                    sources=[],
+                    tool_results=tool_results,
+                )
+
             is_valid, validation_message = validate_drafted_sql(drafted.sql)
             if not is_valid:
                 tool_results["sql_draft_error"] = validation_message
@@ -529,12 +435,15 @@ class LangChainOrchestrator:
                 title="Review SQL before execution",
                 description=drafted.explanation,
                 data={
+                    "question": message,
+                    "property_code": normalized_code,
+                    "model": model,
                     "sql": drafted.sql,
                     "explanation": drafted.explanation,
-                    "parameters": drafted.parameters,
+                    "parameters": {"property_code": normalized_code},
                     "safety_notes": drafted.safety_notes,
                     "status": "pending_approval",
-                    "executable": False,
+                    "executable": True,
                 },
             )
             tool_results["sql_draft"] = component.data
@@ -693,50 +602,6 @@ class LangChainOrchestrator:
             sources=sources,
             tool_results=tool_results,
         )
-
-    def _collect_structured(
-        self,
-        property_code: str,
-        message: str,
-        tool_results: dict[str, Any],
-        components: list[UIComponent],
-        intent: str | None = None,
-    ) -> None:
-        text = message.lower()
-        latest_kpis = self._call_tool("get_latest_property_kpis", property_code=property_code)
-        tool_results["latest_kpis"] = latest_kpis
-        if self._wants_kpi_cards(text, intent):
-            self._add_kpi_components(latest_kpis, components)
-
-        if self._wants_rent_lease_comparison(text, intent):
-            comparison = self._rent_lease_comparison(latest_kpis)
-            if comparison:
-                tool_results["rent_lease_comparison"] = comparison
-                components.append(
-                    UIComponent(
-                        type="comparison_view",
-                        title="Market Rent vs Lease Charges",
-                        data=comparison["items"],
-                    )
-                )
-
-        if self._wants_occupancy_trend(text, intent):
-            trend = self._call_tool("get_occupancy_trend", property_code=property_code, months=12)
-            tool_results["occupancy_trend"] = trend
-            components.append(
-                UIComponent(
-                    type="line_chart",
-                    title="Occupancy Trend",
-                    data=[
-                        {
-                            "label": row["report_month"],
-                            "value": row["unit_occupancy_pct"],
-                            "unit": "%",
-                        }
-                        for row in trend
-                    ],
-                )
-            )
 
     def _collect_structured_from_plan(
         self,
@@ -1420,7 +1285,8 @@ class LangChainOrchestrator:
             if in_table and not stripped:
                 in_table = False
                 continue
-            if in_table and re.match(r"^[-+*]?\s*(unit|a\d+|b\d+|\+\s*\d+\s+more)\b", stripped, re.IGNORECASE):
+            table_row_pattern = r"^[-+*]?\s*(unit|a\d+|b\d+|\+\s*\d+\s+more)\b"
+            if in_table and re.match(table_row_pattern, stripped, re.IGNORECASE):
                 continue
             in_table = False
             filtered_lines.append(line)
@@ -2175,7 +2041,10 @@ class LangChainOrchestrator:
             )
         return sorted(
             results,
-            key=lambda row: (category_order.get(row["bedroom_category"], 99), row["bedroom_category"]),
+            key=lambda row: (
+                category_order.get(row["bedroom_category"], 99),
+                row["bedroom_category"],
+            ),
         )
 
     @staticmethod
@@ -2572,85 +2441,12 @@ class LangChainOrchestrator:
         return "low"
 
     @staticmethod
-    def _wants_structured(message: str) -> bool:
-        text = message.lower()
-        return any(term in text for term in STRUCTURED_TERMS)
-
-    @staticmethod
-    def _wants_retrieval(message: str) -> bool:
-        text = message.lower()
-        return any(term in text for term in RETRIEVAL_TERMS)
-
-    @staticmethod
     def _wants_location_answer(text: str) -> bool:
         return any(term in text for term in ["address", "located", "location", "where is"])
 
     @staticmethod
     def _wants_location_website_context(text: str) -> bool:
         return any(term in text for term in ["website", "neighborhood", "nearby", "context"])
-
-    @staticmethod
-    def _needs_clarification(
-        message: str,
-        wants_structured: bool,
-        wants_retrieval: bool,
-    ) -> bool:
-        text = message.strip().lower()
-        if not text:
-            return True
-
-        tokens = [
-            match.group(0).lower().replace("'", "")
-            for match in ANSWER_TOKEN_RE.finditer(text)
-        ]
-        normalized = " ".join(tokens)
-        if normalized in AMBIGUOUS_REQUESTS:
-            return True
-        if tokens and all(token in AMBIGUOUS_DOMAIN_REQUESTS for token in tokens):
-            return True
-
-        if wants_structured or wants_retrieval:
-            return False
-
-        if len(tokens) <= 2:
-            return True
-
-        meaningful_tokens = [token for token in tokens if token not in ANSWER_STOPWORDS]
-        return bool(meaningful_tokens) and all(
-            token in AMBIGUOUS_TOKENS for token in meaningful_tokens
-        )
-
-    @staticmethod
-    def _infer_page_type(message: str) -> str | None:
-        text = message.lower()
-        if any(
-            term in text
-            for term in [
-                "amenit",
-                "bike",
-                "charging",
-                "court",
-                "dryer",
-                "ev",
-                "feature",
-                "features",
-                "fitness",
-                "parking",
-                "pet",
-                "pickleball",
-                "pool",
-                "storage",
-                "washer",
-            ]
-        ):
-            return "amenities"
-        if "floor" in text:
-            return "floorplans"
-        if "gallery" in text or "photo" in text or "image" in text:
-            return "gallery"
-        if "neighborhood" in text:
-            return "neighborhood"
-        return None
 
     @staticmethod
     def _sources_from_retrieval(results: list[dict]) -> list[Source]:
