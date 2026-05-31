@@ -1,6 +1,8 @@
--- One row per property. This is the root scope table used by the UI,
--- structured queries, and retrieval tools to keep every answer bounded to
--- the active property_code.
+-- properties
+-- What it stores: one master record per property, keyed by property_code.
+-- Why it is useful: this is the root scoping table for the whole assistant.
+-- The UI, SQL tools, retrieval filters, and response metadata all use the
+-- selected property_code from this table so answers stay property-specific.
 CREATE TABLE IF NOT EXISTS properties (
   property_code VARCHAR(32) PRIMARY KEY,
   property_name VARCHAR(255) NOT NULL,
@@ -10,9 +12,12 @@ CREATE TABLE IF NOT EXISTS properties (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- One row per imported rent-roll file/month. This table lets the assistant
--- identify the latest available snapshot, build month-over-month trends, and
--- reject requests for years or months that are not present in the data.
+-- rent_roll_reports
+-- What it stores: one record for each imported rent-roll file/month for a
+-- property, including source file metadata and report_month.
+-- Why it is useful: this table defines the available reporting snapshots. It
+-- lets the assistant find the latest month, build trends across months, audit
+-- where data came from, and avoid answering for periods that were not loaded.
 CREATE TABLE IF NOT EXISTS rent_roll_reports (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   property_code VARCHAR(32) NOT NULL,
@@ -29,9 +34,13 @@ CREATE TABLE IF NOT EXISTS rent_roll_reports (
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Unit-level rent-roll rows. This table powers detailed operational questions
--- such as vacant units, highest balances, average rent by unit type, square
--- footage, resident status, and lease timing.
+-- rent_roll_units
+-- What it stores: one row per unit in each rent-roll report, including unit
+-- number, unit type, square footage, status, market rent, balance, and lease
+-- dates.
+-- Why it is useful: this is the main unit-level analytics table. It powers
+-- questions about vacant units, highest balances, rent by unit type, unit mix,
+-- square footage, occupancy status, and other operational details.
 CREATE TABLE IF NOT EXISTS rent_roll_units (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   report_id BIGINT NOT NULL,
@@ -62,9 +71,12 @@ CREATE TABLE IF NOT EXISTS rent_roll_units (
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Unit-level lease charge rows tied back to a rent_roll_units record. This is
--- useful for charge drilldowns at the individual unit level and preserves the
--- detailed charge-code lines parsed from the rent-roll file.
+-- lease_charges
+-- What it stores: detailed lease charge lines for each unit/report, tied back
+-- to rent_roll_units by rent_roll_unit_id.
+-- Why it is useful: this preserves the granular charge-code data from the
+-- source rent roll. It can support future drilldowns like charges by unit,
+-- charge history for a unit, or charge-category analysis at a detailed level.
 CREATE TABLE IF NOT EXISTS lease_charges (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   rent_roll_unit_id BIGINT NOT NULL,
@@ -86,9 +98,14 @@ CREATE TABLE IF NOT EXISTS lease_charges (
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Report-level summary KPI rows from the rent roll. This table powers high-level
--- answers such as occupancy, total units, market rent, lease charges, vacant unit
--- counts, balances, and occupancy trends over time.
+-- rent_roll_summary_groups
+-- What it stores: report-level summary rows from the rent roll, usually grouped
+-- by summary categories such as total property, occupied, vacant, or other
+-- rent-roll groupings.
+-- Why it is useful: this table powers high-level KPI answers such as occupancy,
+-- total units, vacant unit count, market rent, lease charges, balances, and
+-- month-over-month occupancy trends without recalculating everything from raw
+-- unit rows each time.
 CREATE TABLE IF NOT EXISTS rent_roll_summary_groups (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   report_id BIGINT NOT NULL,
@@ -113,9 +130,13 @@ CREATE TABLE IF NOT EXISTS rent_roll_summary_groups (
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Report-level charge totals grouped by charge code. This table powers charge
--- breakdown answers and charts, such as the biggest lease charge categories for
--- the latest month.
+-- rent_roll_charge_summary
+-- What it stores: report-level charge totals grouped by charge_code for each
+-- property/month.
+-- Why it is useful: this table powers charge breakdown answers and charts, such
+-- as top lease charge categories, rent vs fee composition, and latest-month
+-- charge totals. It is faster and cleaner than summing every unit-level charge
+-- line for common dashboard questions.
 CREATE TABLE IF NOT EXISTS rent_roll_charge_summary (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,
   report_id BIGINT NOT NULL,

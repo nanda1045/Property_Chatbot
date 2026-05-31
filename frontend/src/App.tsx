@@ -32,6 +32,8 @@ const MARKDOWN_COMPONENTS = {
   )
 };
 
+const DEFAULT_MODEL_ID = "anthropic:claude-haiku-4-5-20251001";
+
 function displayProperty(property?: PropertyOption) {
   if (!property) {
     return "";
@@ -42,7 +44,7 @@ function displayProperty(property?: PropertyOption) {
 export default function App() {
   const [models, setModels] = useState<ModelOption[]>([]);
   const [properties, setProperties] = useState<PropertyOption[]>([]);
-  const [model, setModel] = useState("anthropic:claude-haiku-4-5-20251001");
+  const [model, setModel] = useState(DEFAULT_MODEL_ID);
   const [propertyCode, setPropertyCode] = useState("115r");
   const [message, setMessage] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -58,7 +60,11 @@ export default function App() {
           getProperties()
         ]);
         setModels(modelResponse.models);
-        setModel(modelResponse.default);
+        setModel(
+          modelResponse.models.some((option) => option.id === DEFAULT_MODEL_ID)
+            ? DEFAULT_MODEL_ID
+            : modelResponse.default
+        );
         setProperties(propertyResponse.properties);
         if (propertyResponse.properties[0]) {
           setPropertyCode(propertyResponse.properties[0].property_code);

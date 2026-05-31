@@ -29,7 +29,6 @@ Data/                        Structured input/output data and retrieval indexes
 config/property_sources.json Property website source map
 evals/                       Golden datasets and evaluation reports
 tests/                       Unit and integration-style tests
-docs/                        More detailed implementation notes
 ```
 
 ## Setup
@@ -53,8 +52,16 @@ You do not need to install a local MySQL server or the `mysql` command-line clie
 
 2. Install `uv` (Python package manager):
 
+macOS with Homebrew:
+
 ```bash
 brew install uv
+```
+
+macOS/Linux without Homebrew:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 Windows (PowerShell):
@@ -63,7 +70,7 @@ Windows (PowerShell):
 winget install --id Astral.uv -e
 ```
 
-If Python is already installed:
+Any OS, if Python/pip is already installed:
 
 ```bash
 pip install uv
@@ -350,24 +357,3 @@ Evaluation coverage includes:
 - The SQL approval guard is intentionally strict. Complex valid SQL may be rejected if it cannot prove every referenced table is scoped to the active property or if it references columns outside the allowlist.
 - The SQL approval route improves flexibility, but production-grade analytics would still benefit from a formal metric catalog and more validated tools for metric families such as renewal trends, bad debt percentage, lease expirations, or move-in/move-out analytics.
 - If retrieval indexes are deleted, run `scripts/ingest_unstructured.py` again before testing website questions.
-
-## Packaging Notes
-
-Do not include local secrets in the final zip:
-
-- exclude `.env`
-- exclude `.venv/`
-- exclude `frontend/node_modules/`
-- exclude `frontend/dist/`
-- exclude Python caches and test caches
-
-Include `.env.example`, source code, scripts, docs, config, tests, eval files, and the representative data needed to reproduce the prototype.
-
-## Additional Docs
-
-- `docs/structured-data-load.md`
-- `docs/unstructured-source-plan.md`
-- `docs/retrieval-ingestion.md`
-- `docs/langchain-orchestration.md`
-- `docs/frontend-ui.md`
-- `docs/evals.md`
