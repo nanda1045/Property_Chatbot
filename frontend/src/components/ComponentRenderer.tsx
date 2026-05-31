@@ -383,10 +383,6 @@ function SqlApprovalPanel({
   const data = isRecord(component.data) ? component.data : {};
   const sql = typeof data.sql === "string" ? data.sql : "";
   const explanation = typeof data.explanation === "string" ? data.explanation : component.description;
-  const parameters = isRecord(data.parameters) ? data.parameters : {};
-  const safetyNotes = Array.isArray(data.safety_notes)
-    ? data.safety_notes.filter((note): note is string => typeof note === "string")
-    : [];
   const status = typeof data.status === "string" ? data.status : "pending_approval";
   const executable = data.executable !== false;
 
@@ -400,22 +396,6 @@ function SqlApprovalPanel({
         <strong>Status:</strong> {formatColumnName(status)}
       </p>
       <pre>{sql}</pre>
-      {Object.keys(parameters).length > 0 ? (
-        <div>
-          <strong>Parameters</strong>
-          <pre>{JSON.stringify(parameters, null, 2)}</pre>
-        </div>
-      ) : null}
-      {safetyNotes.length > 0 ? (
-        <div>
-          <strong>Safety notes</strong>
-          <ul>
-            {safetyNotes.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
       {executable ? (
         <button type="button" onClick={() => onApprove?.(component)} disabled={!sql || !onApprove}>
           Run approved query

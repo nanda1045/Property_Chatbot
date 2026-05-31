@@ -28,7 +28,6 @@ scripts/                     Data loading, scraping, ingestion, and eval runners
 Data/                        Structured input/output data and retrieval indexes
 config/property_sources.json Property website source map
 evals/                       Golden datasets and evaluation reports
-tests/                       Unit and integration-style tests
 ```
 
 ## Setup
@@ -233,7 +232,7 @@ flowchart LR
 3. The backend loads the selected property profile and normalizes the active `property_code`.
 4. The orchestrator creates `LLMToolPlanner`. The planner first applies deterministic guardrails for ambiguity, PII, unsafe SQL, unsupported external data, and cross-property requests.
 5. For real LLM models, the planner can classify the request as `structured`, `retrieval`, `hybrid`, `sql_approval`, `unsupported`, or `clarification`.
-6. If the LLM planner cannot return a valid plan, or if the mock model is used in tests, the system falls back to deterministic planning.
+6. If the LLM planner cannot return a valid plan, the system falls back to deterministic planning.
 7. Tool names are validated against an allowlist; property scoping is injected server-side, never trusted from the LLM.
 8. Common structured analytics are routed to bounded SQL-backed tools such as latest KPIs, occupancy trend, charge breakdown, top balances, vacant units, rent by unit type, and rent vs lease charges.
 9. Website questions are routed to property-scoped retrieval over scraped website chunks.
@@ -302,14 +301,6 @@ Examples the assistant is designed to handle:
 - no-evidence website questions, such as reviews when reviews were not scraped
 
 ## Evaluations
-
-Run the local test suite:
-
-```bash
-uv run pytest
-```
-
-Some integration-style tests are skipped unless MySQL and the representative test data are available locally.
 
 Run the golden retrieval and generation dataset:
 
