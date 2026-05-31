@@ -97,6 +97,13 @@ OPENAI_API_KEY=...
 GROQ_API_KEY=...
 ```
 
+For the smoothest demo with Claude Haiku, set:
+
+```bash
+DEFAULT_LLM_PROVIDER=anthropic
+DEFAULT_LLM_MODEL=claude-haiku-4-5-20251001
+```
+
 6. Install Python dependencies:
 
 ```bash
@@ -108,6 +115,8 @@ uv sync
 ```bash
 docker compose up -d mysql
 ```
+
+If port `3306` is already used by a local MySQL server, either stop the local server or change the port mapping in `docker-compose.yml` and update `MYSQL_PORT` in `.env`.
 
 8. Wait for MySQL to be healthy, then load the structured rent-roll data:
 
@@ -123,6 +132,8 @@ The loader reads the rent-roll Excel files in `Data/RentRoll_LeaseCharges_NamesR
 uv run python scripts/scrape_property_sites.py
 uv run python scripts/ingest_unstructured.py --reset
 ```
+
+The first retrieval-ingestion run may download the local sentence-transformer embedding model into `Data/models/sentence-transformers`, so it needs internet access once.
 
 10. In a second terminal, start the backend:
 
@@ -357,3 +368,14 @@ Evaluation coverage includes:
 - The SQL approval guard is intentionally strict. Complex valid SQL may be rejected if it cannot prove every referenced table is scoped to the active property or if it references columns outside the allowlist.
 - The SQL approval route improves flexibility, but production-grade analytics would still benefit from a formal metric catalog and more validated tools for metric families such as renewal trends, bad debt percentage, lease expirations, or move-in/move-out analytics.
 - If retrieval indexes are deleted, run `scripts/ingest_unstructured.py` again before testing website questions.
+
+## Future Improvements
+
+- Add a formal metric catalog that defines supported business metrics, required tables, calculation rules, SQL templates, freshness requirements, and whether each metric is safe to expose.
+- Expand validated analytics tools for common property-management questions such as renewal trends, bad debt percentage, delinquency aging, lease expirations, move-ins, move-outs, and rent growth.
+- Move custom SQL from free-form draft approval toward approved parameterized query templates generated from the metric catalog.
+- Add a richer conversation state layer, such as LangGraph, for multi-step follow-ups, clarification loops, and durable session memory.
+- Add scheduled website re-scraping and index refresh jobs so retrieval content stays current.
+- Add stronger retrieval evaluation with larger golden datasets, human labels, and periodic LLM-judge scoring for faithfulness, answer relevance, and citation quality.
+- Add authentication, role-based access control, and audit logs before using the system with real users or sensitive property data.
+- Move Chroma/BM25 to production-ready managed retrieval infrastructure if the number of properties or users grows.
