@@ -2396,6 +2396,9 @@ class LangChainOrchestrator:
         message: str,
         results: list[dict],
     ) -> list[dict]:
+        # Retrieval can return the best available chunk even when the evidence is weak.
+        # This pass records which query terms actually appear in matching content lines,
+        # then labels each chunk as low/medium/high confidence before the LLM sees it.
         annotated = []
         required_terms = set(self._answer_terms(message))
         for result in results or []:
@@ -2430,6 +2433,10 @@ class LangChainOrchestrator:
         line_details: list[dict[str, Any]],
         result: dict,
     ) -> str:
+        # High confidence means the chunk matched the required answer terms and both
+        # semantic vector search and BM25 keyword search independently retrieved it.
+        # Medium confidence is usable evidence; low confidence is filtered out for
+        # grounded yes/no and property-fact answers.
         if not line_details:
             return "low"
         if required_terms and required_terms.issubset(matched_terms):
