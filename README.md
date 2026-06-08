@@ -125,6 +125,26 @@ uv run python scripts/load_rent_roll_mysql.py --reset
 
 The loader reads the rent-roll Excel files in `Data/RentRoll_LeaseCharges_NamesRedacted copy/` and creates normalized MySQL tables keyed by `property_code`.
 
+To manually inspect the MySQL tables inside the Docker container:
+
+```bash
+docker compose exec mysql mysql -u root -proot aker_chatbot
+```
+
+If you create a custom `aker` MySQL user/password locally, you can use:
+
+```bash
+docker compose exec mysql mysql -u aker -paker aker_chatbot
+```
+
+Useful commands inside the MySQL prompt:
+
+```sql
+SHOW TABLES;
+DESCRIBE properties;
+SELECT * FROM properties LIMIT 5;
+```
+
 9. First-time setup only: scrape websites and build retrieval indexes:
 
 ```bash

@@ -253,6 +253,19 @@ class LangChainOrchestrator:
             )
 
         tool_results["property_profile"] = profile
+        scope_conflict = self._property_scope_conflict(message, profile)
+        if scope_conflict:
+            return ChatResponse(
+                property_code=normalized_code,
+                model=model,
+                answer_markdown=self._property_scope_conflict_answer(
+                    active_profile=profile,
+                    mentioned_property=scope_conflict["property_name"],
+                ),
+                components=[],
+                sources=[],
+                tool_results=tool_results,
+            )
         scope_note = self._property_scope_note(message, profile)
 
         intent_route = self.intent_router.route(message)
@@ -1207,6 +1220,53 @@ class LangChainOrchestrator:
             f"property is **{active_name} (`{active_code}`)**. I’ll answer using only "
             f"{active_name} data."
         )
+
+    def _property_scope_conflict(self, message: str, active_profile: dict) -> dict | None:
+        mentioned = self._mentioned_other_property(message, active_profile)
+        if mentioned:
+            return mentioned
+
+        explicit_name = self._explicit_property_name_from_message(message)
+        if not explicit_name:
+            return None
+
+        normalized_name = self._normalize_property_phrase(explicit_name)
+        active_code = str(active_profile["property_code"]).lower()
+        active_name = self._normalize_property_phrase(active_profile["property_name"])
+        if normalized_name in {"active", "selected", "this"}:
+            return None
+        if normalized_name == active_code or normalized_name == active_name:
+            return None
+        return {"property_name": explicit_name.strip()}
+
+    @staticmethod
+    def _property_scope_conflict_answer(
+        active_profile: dict,
+        mentioned_property: str,
+    ) -> str:
+        active_name = active_profile["property_name"]
+        active_code = active_profile["property_code"]
+        return (
+            f"### {active_name} (`{active_code}`)\n\n"
+            f"I can't answer that because the selected property is **{active_name} "
+            f"(`{active_code}`)**, but your question asks about **{mentioned_property}**.\n\n"
+            "Please select the correct property code first, then ask the question again."
+        )
+
+    @staticmethod
+    def _explicit_property_name_from_message(message: str) -> str | None:
+        patterns = [
+            r"\bfor\s+(?:the\s+)?property\s+(.+?)(?:,|\?|$)",
+            r"\babout\s+(?:the\s+)?property\s+(.+?)(?:,|\?|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if not match:
+                continue
+            name = match.group(1).strip(" .:-")
+            if name:
+                return name
+        return None
 
     def _mentioned_other_property(
         self,
