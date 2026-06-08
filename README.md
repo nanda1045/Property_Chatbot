@@ -190,6 +190,26 @@ To rebuild retrieval indexes:
 uv run python scripts/ingest_unstructured.py --reset
 ```
 
+To refresh scraped website content and rebuild Chroma/BM25 in one command:
+
+```bash
+scripts/refresh_retrieval_indexes.sh
+```
+
+To run this automatically every day at 2:00 AM with cron:
+
+```bash
+crontab -e
+```
+
+Add this line, replacing the project path with your local path:
+
+```cron
+0 2 * * * cd /path/to/AKER_Chatbot && /path/to/AKER_Chatbot/scripts/refresh_retrieval_indexes.sh >> /path/to/AKER_Chatbot/logs/cron.log 2>&1
+```
+
+This keeps website retrieval fresh without scraping during user chat requests. Chat latency stays low because the chatbot still searches the prebuilt Chroma and BM25 indexes.
+
 To manually test scoped retrieval:
 
 ```bash
