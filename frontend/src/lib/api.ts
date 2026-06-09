@@ -31,13 +31,15 @@ export async function sendChat(params: {
   propertyCode: string;
   model: string;
   message: string;
+  conversationId?: string;
 }): Promise<ChatResponse> {
   return request("/chat", {
     method: "POST",
     body: JSON.stringify({
       property_code: params.propertyCode,
       model: params.model,
-      message: params.message
+      message: params.message,
+      conversation_id: params.conversationId
     })
   });
 }
@@ -47,6 +49,7 @@ export async function executeApprovedSql(params: {
   model: string;
   sql: string;
   question: string;
+  conversationId?: string;
 }): Promise<ChatResponse> {
   return request("/sql/execute", {
     method: "POST",
@@ -54,7 +57,8 @@ export async function executeApprovedSql(params: {
       property_code: params.propertyCode,
       model: params.model,
       sql: params.sql,
-      question: params.question
+      question: params.question,
+      conversation_id: params.conversationId
     })
   });
 }
@@ -83,6 +87,7 @@ export async function sendChatStream(
     propertyCode: string;
     model: string;
     message: string;
+    conversationId?: string;
   },
   handlers: StreamHandlers
 ): Promise<ChatResponse> {
@@ -94,7 +99,8 @@ export async function sendChatStream(
     body: JSON.stringify({
       property_code: params.propertyCode,
       model: params.model,
-      message: params.message
+      message: params.message,
+      conversation_id: params.conversationId
     })
   });
 

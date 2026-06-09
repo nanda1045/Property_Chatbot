@@ -29,6 +29,7 @@ export type Source = {
 export type ChatResponse = {
   property_code: string;
   model: string;
+  conversation_id?: string | null;
   answer_markdown: string;
   components: UIComponent[];
   sources: Source[];

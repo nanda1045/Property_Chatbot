@@ -33,6 +33,7 @@ const MARKDOWN_COMPONENTS = {
 };
 
 const DEFAULT_MODEL_ID = "anthropic:claude-haiku-4-5-20251001";
+const CONVERSATION_ID_STORAGE_KEY = "aker_conversation_id";
 
 function displayProperty(property?: PropertyOption) {
   if (!property) {
@@ -41,11 +42,30 @@ function displayProperty(property?: PropertyOption) {
   return `${property.property_code.toUpperCase()} - ${property.property_name}`;
 }
 
+function createConversationId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getInitialConversationId() {
+  const stored = window.localStorage.getItem(CONVERSATION_ID_STORAGE_KEY);
+  if (stored) {
+    return stored;
+  }
+
+  const next = createConversationId();
+  window.localStorage.setItem(CONVERSATION_ID_STORAGE_KEY, next);
+  return next;
+}
+
 export default function App() {
   const [models, setModels] = useState<ModelOption[]>([]);
   const [properties, setProperties] = useState<PropertyOption[]>([]);
   const [model, setModel] = useState(DEFAULT_MODEL_ID);
   const [propertyCode, setPropertyCode] = useState("115r");
+  const [conversationId, setConversationId] = useState(getInitialConversationId);
   const [message, setMessage] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [loading, setLoading] = useState(false);
@@ -109,7 +129,8 @@ export default function App() {
         {
           propertyCode,
           model,
-          message: question
+          message: question,
+          conversationId
         },
         {
           onToken: (token) => {
@@ -123,6 +144,10 @@ export default function App() {
           }
         }
       );
+      if (response.conversation_id && response.conversation_id !== conversationId) {
+        setConversationId(response.conversation_id);
+        window.localStorage.setItem(CONVERSATION_ID_STORAGE_KEY, response.conversation_id);
+      }
       setTurns((current) =>
         current.map((turn) =>
           turn.id === turnId ? { ...turn, response, streamedAnswer: undefined } : turn
@@ -170,7 +195,8 @@ export default function App() {
         propertyCode: approvedPropertyCode,
         model: approvedModel,
         sql,
-        question
+        question,
+        conversationId
       });
       setTurns((current) =>
         current.map((turn) =>

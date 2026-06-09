@@ -4,6 +4,7 @@ import json
 import queue
 import threading
 from typing import Annotated
+from uuid import uuid4
 
 import uvicorn
 from fastapi import Depends, FastAPI
@@ -13,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from app.core.config import Settings, get_settings
 from app.db.mysql import MySQLDatabase
 from app.schemas import ChatRequest, ChatResponse, SqlApprovalRequest, UIComponent
+from app.services.conversation_memory import ConversationMemory
 from app.services.langchain_orchestrator import LangChainOrchestrator
 from app.services.rent_roll_repository import RentRollRepository
 from app.services.sql_approval import execute_approved_sql
@@ -36,6 +38,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+conversation_memory = ConversationMemory()
 
 
 @app.get("/health")
@@ -79,21 +83,35 @@ def properties(settings: SettingsDep) -> dict[str, list[dict]]:
 
 @app.post("/chat")
 def chat(request: ChatRequest, settings: SettingsDep) -> ChatResponse:
+    conversation_id = request.conversation_id or str(uuid4())
+    history = conversation_memory.get(conversation_id, request.property_code)
     orchestrator = LangChainOrchestrator(settings)
-    return orchestrator.answer(
+    response = orchestrator.answer(
         property_code=request.property_code,
         message=request.message,
         model=request.model,
+        history=history,
     )
+    response.conversation_id = conversation_id
+    conversation_memory.add(
+        conversation_id=conversation_id,
+        property_code=response.property_code,
+        user_message=request.message,
+        assistant_answer=response.answer_markdown,
+        tool_result_keys=sorted(response.tool_results),
+        component_types=[component.type for component in response.components],
+    )
+    return response
 
 
 @app.post("/sql/execute")
 def execute_sql(request: SqlApprovalRequest, settings: SettingsDep) -> ChatResponse:
     normalized_code = request.property_code.lower()
     validated_sql, rows = execute_approved_sql(settings, request.sql, normalized_code)
-    return ChatResponse(
+    response = ChatResponse(
         property_code=normalized_code,
         model=request.model,
+        conversation_id=request.conversation_id,
         answer_markdown=(
             "I ran the approved read-only query for the selected property. "
             f"It returned **{len(rows)}** row{'s' if len(rows) != 1 else ''}."
@@ -112,6 +130,15 @@ def execute_sql(request: SqlApprovalRequest, settings: SettingsDep) -> ChatRespo
             "row_count": len(rows),
         },
     )
+    conversation_memory.add(
+        conversation_id=request.conversation_id,
+        property_code=normalized_code,
+        user_message=f"Approved SQL for: {request.question}",
+        assistant_answer=response.answer_markdown,
+        tool_result_keys=sorted(response.tool_results),
+        component_types=[component.type for component in response.components],
+    )
+    return response
 
 
 @app.post("/chat/stream")
@@ -127,12 +154,24 @@ def chat_stream(request: ChatRequest, settings: SettingsDep) -> StreamingRespons
 
         def run_chat() -> None:
             try:
+                conversation_id = request.conversation_id or str(uuid4())
+                history = conversation_memory.get(conversation_id, request.property_code)
                 orchestrator = LangChainOrchestrator(settings)
                 response = orchestrator.answer(
                     property_code=request.property_code,
                     message=request.message,
                     model=request.model,
                     on_token=publish_token,
+                    history=history,
+                )
+                response.conversation_id = conversation_id
+                conversation_memory.add(
+                    conversation_id=conversation_id,
+                    property_code=response.property_code,
+                    user_message=request.message,
+                    assistant_answer=response.answer_markdown,
+                    tool_result_keys=sorted(response.tool_results),
+                    component_types=[component.type for component in response.components],
                 )
                 events.put(("final", response.model_dump()))
             except Exception as error:

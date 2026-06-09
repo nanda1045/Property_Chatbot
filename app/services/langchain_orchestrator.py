@@ -238,6 +238,7 @@ class LangChainOrchestrator:
         message: str,
         model: str,
         on_token: Callable[[str], None] | None = None,
+        history: list[dict[str, Any]] | None = None,
     ) -> ChatResponse:
         normalized_code = property_code.lower()
         tool_results: dict[str, Any] = {}
@@ -267,6 +268,26 @@ class LangChainOrchestrator:
                 tool_results=tool_results,
             )
         scope_note = self._property_scope_note(message, profile)
+
+        component_followup = self._component_followup_answer(
+            profile=profile,
+            property_code=normalized_code,
+            message=message,
+            history=history,
+        )
+        if component_followup:
+            tool_results.update(component_followup.get("tool_results") or {})
+            return ChatResponse(
+                property_code=normalized_code,
+                model=model,
+                answer_markdown=self._with_scope_note(
+                    component_followup["answer_markdown"],
+                    scope_note,
+                ),
+                components=[],
+                sources=[],
+                tool_results=tool_results,
+            )
 
         intent_route = self.intent_router.route(message)
         intent = intent_route.intent
@@ -318,13 +339,21 @@ class LangChainOrchestrator:
 
         plan: ToolPlan | None = None
         chat_invoke: Callable[[list[dict[str, str]]], str] | None = None
+        history_context = self._history_context(history)
 
         if provider != "mock" and model_name:
             def chat_invoke(messages: list[dict[str, str]]) -> str:
+                user_content = messages[1]["content"]
+                if history_context:
+                    user_content = (
+                        f"Recent conversation for this same selected property:\n"
+                        f"{history_context}\n\n"
+                        f"Current request:\n{user_content}"
+                    )
                 response = self._chat_model(provider, model_name).invoke(
                     [
                         SystemMessage(content=messages[0]["content"]),
-                        HumanMessage(content=messages[1]["content"]),
+                        HumanMessage(content=user_content),
                     ]
                 )
                 return str(response.content)
@@ -599,6 +628,7 @@ class LangChainOrchestrator:
             components=components,
             intent=intent,
             on_token=on_token,
+            history=history,
         )
 
         if scope_note:
@@ -824,6 +854,7 @@ class LangChainOrchestrator:
         components: list[UIComponent],
         intent: str | None = None,
         on_token: Callable[[str], None] | None = None,
+        history: list[dict[str, Any]] | None = None,
     ) -> str:
         provider, _, model_name = model.partition(":")
         if (
@@ -871,6 +902,12 @@ class LangChainOrchestrator:
         )
         prompt_tool_results = self._tool_results_for_prompt(message, tool_results, components)
         prompt_components = self._components_for_prompt(components)
+        history_context = self._history_context(history)
+        history_block = (
+            f"Recent conversation for this same selected property:\n{history_context}\n\n"
+            if history_context
+            else ""
+        )
         prompt = ChatPromptTemplate.from_messages(
             [
                 SystemMessage(content=system_prompt),
@@ -878,6 +915,7 @@ class LangChainOrchestrator:
                     content=(
                         f"Active property_code: {property_code}\n"
                         f"Routed intent: {intent or 'unspecified'}\n"
+                        f"{history_block}"
                         f"User question: {message}\n\n"
                         f"Tool results JSON:\n"
                         f"{json.dumps(prompt_tool_results, ensure_ascii=True)}\n\n"
@@ -900,6 +938,145 @@ class LangChainOrchestrator:
             return "".join(chunks)
         response = (prompt | chat_model).invoke({})
         return str(response.content)
+
+    @staticmethod
+    def _history_context(history: list[dict[str, Any]] | None) -> str:
+        if not history:
+            return ""
+
+        lines: list[str] = []
+        for index, turn in enumerate(history[-4:], start=1):
+            user = str(turn.get("user") or "").strip()
+            assistant = str(turn.get("assistant") or "").strip()
+            tool_keys = turn.get("tool_result_keys") or []
+            component_types = turn.get("component_types") or []
+            if len(assistant) > 500:
+                assistant = assistant[:497].rstrip() + "..."
+            lines.append(
+                "\n".join(
+                    [
+                        f"Turn {index}:",
+                        f"User: {user}",
+                        f"Assistant: {assistant}",
+                        f"Tool results used: {tool_keys}",
+                        f"UI components shown: {component_types}",
+                    ]
+                )
+            )
+        return "\n\n".join(lines)
+
+    def _component_followup_answer(
+        self,
+        profile: dict,
+        property_code: str,
+        message: str,
+        history: list[dict[str, Any]] | None,
+    ) -> dict[str, Any] | None:
+        if not self._is_component_followup_request(message, history):
+            return None
+
+        text = message.lower()
+        previous_tool_keys = self._recent_history_values(history, "tool_result_keys")
+        heading = f"### {profile['property_name']} (`{property_code}`)"
+
+        if "charge_breakdown" in previous_tool_keys and any(
+            term in text for term in ["total", "sum", "overall"]
+        ):
+            charges = self._call_tool(
+                "get_charge_breakdown",
+                property_code=property_code,
+                limit=10,
+            )
+            total = sum(float(row.get("amount") or 0) for row in charges)
+            report_month = charges[0].get("report_month") if charges else None
+            month_text = f" for **{report_month}**" if report_month else ""
+            return {
+                "answer_markdown": (
+                    f"{heading}\n\n"
+                    "I can't edit the previous chart in place, but I can calculate the "
+                    f"total from that charge breakdown. The displayed charge categories"
+                    f"{month_text} total **{self._format_money(total)}**."
+                ),
+                "tool_results": {
+                    "charge_breakdown_total": {
+                        "report_month": report_month,
+                        "total": total,
+                        "row_count": len(charges),
+                    }
+                },
+            }
+
+        return {
+            "answer_markdown": (
+                f"{heading}\n\n"
+                "I can use the recent chat context, but I can't edit a previously shown "
+                "chart or table in place yet. Ask for the same data again with the exact "
+                "format or fields you want, and I can generate a fresh view."
+            ),
+            "tool_results": {},
+        }
+
+    @staticmethod
+    def _is_component_followup_request(
+        message: str,
+        history: list[dict[str, Any]] | None,
+    ) -> bool:
+        if not history:
+            return False
+
+        text = message.lower()
+        has_recent_component = bool(
+            LangChainOrchestrator._recent_history_values(history, "component_types")
+        )
+        if not has_recent_component:
+            return False
+
+        refers_to_previous = any(
+            term in text
+            for term in [
+                "above",
+                "previous",
+                "last",
+                "that chart",
+                "that table",
+                "this chart",
+                "this table",
+                "same chart",
+                "same table",
+            ]
+        )
+        mentions_component = any(
+            term in text for term in ["chart", "table", "graph", "component", "view"]
+        )
+        wants_edit = any(
+            term in text
+            for term in [
+                "add",
+                "include",
+                "remove",
+                "change",
+                "modify",
+                "update",
+                "convert",
+                "column",
+                "row",
+                "total",
+                "sum",
+            ]
+        )
+        return wants_edit and (refers_to_previous or mentions_component)
+
+    @staticmethod
+    def _recent_history_values(
+        history: list[dict[str, Any]] | None,
+        key: str,
+    ) -> set[str]:
+        values: set[str] = set()
+        for turn in (history or [])[-4:]:
+            raw_values = turn.get(key) or []
+            if isinstance(raw_values, list):
+                values.update(str(value) for value in raw_values)
+        return values
 
     @staticmethod
     def _should_use_deterministic_answer(

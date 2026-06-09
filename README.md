@@ -388,7 +388,6 @@ Evaluation coverage includes:
 
 ## Limitations
 
-- Conversation memory is intentionally limited. The system handles many follow-ups, but it is not a full long-term conversational memory system.
 - Website content is only as complete as the latest scrape.
 - If a website hides data behind JavaScript or external APIs, the scraper may not capture every detail.
 - Real LLM calls require valid API keys and available credits.

@@ -9,6 +9,10 @@ class ChatRequest(BaseModel):
     property_code: str = Field(description="Active property code, for example 115r.")
     message: str
     model: str = "anthropic:claude-haiku-4-5-20251001"
+    conversation_id: str | None = Field(
+        default=None,
+        description="Client-generated conversation/session id for lightweight memory.",
+    )
 
 
 class SqlApprovalRequest(BaseModel):
@@ -16,6 +20,7 @@ class SqlApprovalRequest(BaseModel):
     model: str = "anthropic:claude-haiku-4-5-20251001"
     sql: str = Field(description="Backend-validated read-only SQL proposed for approval.")
     question: str = Field(description="Original user question that produced the SQL proposal.")
+    conversation_id: str | None = None
 
 
 class UIComponent(BaseModel):
@@ -36,6 +41,7 @@ class Source(BaseModel):
 class ChatResponse(BaseModel):
     property_code: str
     model: str
+    conversation_id: str | None = None
     answer_markdown: str
     components: list[UIComponent] = Field(default_factory=list)
     sources: list[Source] = Field(default_factory=list)
