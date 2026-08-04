@@ -30,6 +30,8 @@ export type ChatResponse = {
   property_code: string;
   model: string;
   conversation_id?: string | null;
+  run_id?: string | null;
+  run_status?: string | null;
   answer_markdown: string;
   components: UIComponent[];
   sources: Source[];

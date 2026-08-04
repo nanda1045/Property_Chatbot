@@ -103,6 +103,65 @@ class AgentRunStore:
             return None
         return self._row_to_state(row)
 
+    def checkpoint(self, state: AgentState, transition_name: str) -> str:
+        """Append an immutable state snapshot after a meaningful transition."""
+        checkpoint_id = str(uuid4())
+        self.database.execute(
+            """
+            INSERT INTO agent_checkpoints (
+              checkpoint_id, run_id, sequence_number, transition_name, state_json
+            )
+            SELECT %s, %s, COALESCE(MAX(sequence_number), 0) + 1, %s, %s
+            FROM agent_checkpoints WHERE run_id = %s
+            """,
+            (
+                checkpoint_id,
+                state["run_id"],
+                transition_name,
+                _json_dump(state),
+                state["run_id"],
+            ),
+        )
+        return checkpoint_id
+
+    def load_latest_checkpoint(
+        self,
+        run_id: str,
+        user_id: str,
+        conversation_id: str,
+        property_code: str,
+    ) -> AgentState | None:
+        """Reload the latest checkpoint inside the trusted run scope."""
+        row = self.database.fetch_one(
+            """
+            SELECT checkpoints.state_json
+            FROM agent_checkpoints AS checkpoints
+            INNER JOIN agent_runs AS runs ON runs.run_id = checkpoints.run_id
+            WHERE checkpoints.run_id = %s
+              AND runs.user_id = %s
+              AND runs.conversation_id = %s
+              AND runs.property_code = %s
+            ORDER BY checkpoints.sequence_number DESC
+            LIMIT 1
+            """,
+            (run_id, user_id, conversation_id, property_code.lower()),
+        )
+        if row is None:
+            return None
+        return cast(AgentState, _json_load(row["state_json"], None))
+
+    def claim_approval(self, run_id: str, user_id: str, property_code: str) -> bool:
+        """Atomically claim a waiting approval so duplicate clicks cannot execute twice."""
+        affected = self.database.execute(
+            """
+            UPDATE agent_runs SET status = 'running', version = version + 1
+            WHERE run_id = %s AND user_id = %s AND property_code = %s
+              AND status = 'waiting_for_approval'
+            """,
+            (run_id, user_id, property_code.lower()),
+        )
+        return affected == 1
+
     def start_step(
         self,
         state: AgentState,

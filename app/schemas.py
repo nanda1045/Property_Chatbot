@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatRequest(BaseModel):
@@ -16,11 +16,23 @@ class ChatRequest(BaseModel):
 
 
 class SqlApprovalRequest(BaseModel):
+    run_id: str | None = Field(
+        default=None,
+        description="Durable run to resume. Legacy requests may omit this field.",
+    )
     property_code: str = Field(description="Active property code, for example 115r.")
     model: str = "anthropic:claude-haiku-4-5-20251001"
     sql: str = Field(description="Backend-validated read-only SQL proposed for approval.")
     question: str = Field(description="Original user question that produced the SQL proposal.")
     conversation_id: str | None = None
+
+
+class AgentApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    property_code: str = Field(description="Backend-selected active property code.")
+    conversation_id: str
+    approved: bool = True
 
 
 class UIComponent(BaseModel):

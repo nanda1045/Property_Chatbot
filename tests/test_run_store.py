@@ -11,9 +11,21 @@ class MemoryDatabase:
     def __init__(self) -> None:
         self.runs: dict[str, dict[str, Any]] = {}
         self.steps: dict[str, dict[str, Any]] = {}
+        self.checkpoints: list[dict[str, Any]] = []
 
     def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
         normalized = " ".join(query.split())
+        if normalized.startswith("UPDATE agent_runs SET status = 'running'"):
+            run_id, user_id, property_code = params
+            row = self.runs.get(str(run_id))
+            if (
+                not row
+                or (row["user_id"], row["property_code"]) != (user_id, property_code)
+                or row["status"] != "waiting_for_approval"
+            ):
+                return 0
+            row["status"] = "running"
+            return 1
         if normalized.startswith("INSERT INTO agent_runs"):
             keys = [
                 "run_id",
@@ -35,6 +47,26 @@ class MemoryDatabase:
                 "final_answer",
             ]
             self.runs[str(params[0])] = dict(zip(keys, params, strict=True))
+            return 1
+        if normalized.startswith("INSERT INTO agent_checkpoints"):
+            checkpoint_id, run_id, transition_name, state_json, _ = params
+            sequence_number = 1 + max(
+                (
+                    checkpoint["sequence_number"]
+                    for checkpoint in self.checkpoints
+                    if checkpoint["run_id"] == run_id
+                ),
+                default=0,
+            )
+            self.checkpoints.append(
+                {
+                    "checkpoint_id": checkpoint_id,
+                    "run_id": run_id,
+                    "sequence_number": sequence_number,
+                    "transition_name": transition_name,
+                    "state_json": state_json,
+                }
+            )
             return 1
         if normalized.startswith("UPDATE agent_runs SET"):
             run_id, user_id, property_code = params[-3:]
@@ -92,9 +124,31 @@ class MemoryDatabase:
         raise AssertionError(f"Unexpected query: {normalized}")
 
     def fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
-        run_id, user_id, property_code = params
+        normalized = " ".join(query.split())
+        if "FROM agent_checkpoints AS checkpoints" in normalized:
+            run_id, user_id, conversation_id, property_code = params
+        else:
+            run_id, user_id, property_code = params
+            conversation_id = None
         row = self.runs.get(str(run_id))
-        if row and (row["user_id"], row["property_code"]) == (user_id, property_code):
+        if not row or (row["user_id"], row["property_code"]) != (
+            user_id,
+            property_code,
+        ):
+            return None
+        if "FROM agent_checkpoints AS checkpoints" in normalized:
+            if row["conversation_id"] != conversation_id:
+                return None
+            matches = [
+                checkpoint
+                for checkpoint in self.checkpoints
+                if checkpoint["run_id"] == run_id
+            ]
+            if not matches:
+                return None
+            latest = max(matches, key=lambda checkpoint: checkpoint["sequence_number"])
+            return {"state_json": latest["state_json"]}
+        if row:
             return dict(row)
         return None
 
@@ -159,6 +213,43 @@ class AgentRunStoreTests(unittest.TestCase):
                 self.state["run_id"], "another-user", "115r"
             ),
             [],
+        )
+
+    def test_latest_checkpoint_survives_store_recreation_and_is_scoped(self) -> None:
+        self.store.create(self.state)
+        self.store.checkpoint(self.state, "run_created")
+        transition_agent_state(self.state, "planning")
+        self.store.save(self.state)
+        self.store.checkpoint(self.state, "plan_created")
+
+        restarted_store = AgentRunStore(self.database)
+        checkpoint = restarted_store.load_latest_checkpoint(
+            self.state["run_id"], "user-1", "conversation-1", "115r"
+        )
+
+        self.assertEqual(checkpoint["status"], "planning")
+        self.assertIsNone(
+            restarted_store.load_latest_checkpoint(
+                self.state["run_id"], "another-user", "conversation-1", "115r"
+            )
+        )
+        self.assertIsNone(
+            restarted_store.load_latest_checkpoint(
+                self.state["run_id"], "user-1", "another-conversation", "115r"
+            )
+        )
+
+    def test_waiting_approval_can_only_be_claimed_once(self) -> None:
+        self.store.create(self.state)
+        transition_agent_state(self.state, "planning")
+        transition_agent_state(self.state, "waiting_for_approval")
+        self.store.save(self.state)
+
+        self.assertTrue(
+            self.store.claim_approval(self.state["run_id"], "user-1", "115r")
+        )
+        self.assertFalse(
+            self.store.claim_approval(self.state["run_id"], "user-1", "115r")
         )
 
 

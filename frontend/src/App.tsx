@@ -14,7 +14,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ComponentRenderer } from "./components/ComponentRenderer";
-import { executeApprovedSql, getModels, getProperties, sendChatStream } from "./lib/api";
+import { approveAgentRun, getModels, getProperties, sendChatStream } from "./lib/api";
 import type { ChatTurn, ModelOption, PropertyOption, UIComponent } from "./types";
 
 const STARTER_QUESTIONS = [
@@ -180,22 +180,20 @@ export default function App() {
       return;
     }
     const payload = data as Record<string, unknown>;
-    const sql = typeof payload.sql === "string" ? payload.sql : "";
-    const question = typeof payload.question === "string" ? payload.question : "";
+    const turn = turns.find((candidate) => candidate.id === turnId);
+    const runId =
+      typeof payload.run_id === "string" ? payload.run_id : turn?.response?.run_id ?? "";
     const approvedPropertyCode =
       typeof payload.property_code === "string" ? payload.property_code : propertyCode;
-    const approvedModel = typeof payload.model === "string" ? payload.model : model;
-    if (!sql || !question) {
+    if (!runId) {
       return;
     }
 
     setLoading(true);
     try {
-      const response = await executeApprovedSql({
+      const response = await approveAgentRun({
+        runId,
         propertyCode: approvedPropertyCode,
-        model: approvedModel,
-        sql,
-        question,
         conversationId
       });
       setTurns((current) =>

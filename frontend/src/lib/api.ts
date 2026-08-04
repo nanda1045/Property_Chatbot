@@ -63,6 +63,21 @@ export async function executeApprovedSql(params: {
   });
 }
 
+export async function approveAgentRun(params: {
+  runId: string;
+  propertyCode: string;
+  conversationId?: string;
+}): Promise<ChatResponse> {
+  return request(`/api/agent-runs/${encodeURIComponent(params.runId)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({
+      property_code: params.propertyCode,
+      conversation_id: params.conversationId,
+      approved: true
+    })
+  });
+}
+
 type StreamHandlers = {
   onToken: (token: string) => void;
 };

@@ -7,14 +7,20 @@ from typing import Annotated
 from uuid import uuid4
 
 import uvicorn
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from app.agents.runtime import AgentRuntime
+from app.agents.runtime import AgentRunConflictError, AgentRunNotFoundError, AgentRuntime
 from app.core.config import Settings, get_settings
 from app.db.mysql import MySQLDatabase
-from app.schemas import ChatRequest, ChatResponse, SqlApprovalRequest, UIComponent
+from app.schemas import (
+    AgentApprovalRequest,
+    ChatRequest,
+    ChatResponse,
+    SqlApprovalRequest,
+    UIComponent,
+)
 from app.services.conversation_memory import ConversationMemory
 from app.services.rent_roll_repository import RentRollRepository
 from app.services.sql_approval import execute_approved_sql
@@ -108,6 +114,22 @@ def chat(request: ChatRequest, settings: SettingsDep) -> ChatResponse:
 
 @app.post("/sql/execute")
 def execute_sql(request: SqlApprovalRequest, settings: SettingsDep) -> ChatResponse:
+    if request.run_id:
+        if not request.conversation_id:
+            raise HTTPException(
+                status_code=422,
+                detail="conversation_id is required when resuming an agent run",
+            )
+        response = _resolve_agent_approval(
+            run_id=request.run_id,
+            property_code=request.property_code,
+            conversation_id=request.conversation_id,
+            approved=True,
+            settings=settings,
+        )
+        _record_approval_response(response, request.question)
+        return response
+
     normalized_code = request.property_code.lower()
     validated_sql, rows = execute_approved_sql(settings, request.sql, normalized_code)
     response = ChatResponse(
@@ -141,6 +163,57 @@ def execute_sql(request: SqlApprovalRequest, settings: SettingsDep) -> ChatRespo
         component_types=[component.type for component in response.components],
     )
     return response
+
+
+@app.post("/api/agent-runs/{run_id}/approve")
+def approve_agent_run(
+    run_id: str,
+    request: AgentApprovalRequest,
+    settings: SettingsDep,
+) -> ChatResponse:
+    response = _resolve_agent_approval(
+        run_id=run_id,
+        property_code=request.property_code,
+        conversation_id=request.conversation_id,
+        approved=request.approved,
+        settings=settings,
+    )
+    question = str(response.tool_results.get("question") or "custom SQL request")
+    _record_approval_response(response, question)
+    return response
+
+
+def _resolve_agent_approval(
+    *,
+    run_id: str,
+    property_code: str,
+    conversation_id: str,
+    approved: bool,
+    settings: Settings,
+) -> ChatResponse:
+    try:
+        return AgentRuntime(settings).resolve_sql_approval(
+            run_id=run_id,
+            property_code=property_code,
+            approved=approved,
+            conversation_id=conversation_id,
+            user_id=settings.runtime_user_id,
+        )
+    except AgentRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except AgentRunConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+def _record_approval_response(response: ChatResponse, question: str) -> None:
+    conversation_memory.add(
+        conversation_id=response.conversation_id,
+        property_code=response.property_code,
+        user_message=f"SQL approval decision for: {question}",
+        assistant_answer=response.answer_markdown,
+        tool_result_keys=sorted(response.tool_results),
+        component_types=[component.type for component in response.components],
+    )
 
 
 @app.post("/chat/stream")

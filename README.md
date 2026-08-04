@@ -237,6 +237,22 @@ curl -N -X POST http://127.0.0.1:8000/chat/stream \
   }'
 ```
 
+Resume a checkpointed SQL approval using the `run_id` returned by chat:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/agent-runs/RUN_ID/approve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "property_code": "115r",
+    "conversation_id": "CONVERSATION_ID",
+    "approved": true
+  }'
+```
+
+The approval endpoint reloads the saved checkpoint and executes the server-stored SQL
+draft. SQL sent by the client is not accepted by this endpoint. The legacy
+`POST /sql/execute` endpoint remains available for backward compatibility.
+
 ## Architecture Overview
 
 The system is organized as a scoped retrieval and orchestration pipeline.
@@ -254,6 +270,7 @@ flowchart LR
   Tools --> MySQL["MySQL (Rent-Roll)"]
   Tools --> Retrieval["Website Retrieval"]
   Workflow --> SQLApproval["SQL Draft + Approval"]
+  SQLApproval --> RunStore
   Workflow --> LLM["LLM Answer"]
   Workflow --> Response["Response + UI Components"]
   Response --> UI
@@ -280,6 +297,19 @@ flowchart LR
 19. Retrieved chunks are annotated with evidence confidence before being used in the answer.
 20. The API returns Markdown, sources, tool results, and structured UI component definitions.
 21. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
+
+### Agent Run Lifecycle
+
+```text
+Created -> Planning -> Running -> Waiting for Approval
+        -> Running -> Verifying -> Completed
+```
+
+The runtime appends an immutable checkpoint after run creation, plan creation, step
+start/completion/failure, approval request/decision, SQL execution, verification, and
+terminal completion or failure. Approval uses an atomic database claim, so duplicate
+clicks cannot execute the same pending SQL twice. Checkpoint loading is scoped by the
+backend-owned user identity, conversation, and active property.
 
 ## Design Decisions
 
