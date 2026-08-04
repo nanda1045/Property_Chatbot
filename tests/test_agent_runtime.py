@@ -93,6 +93,7 @@ class RecordingRunStore:
 class AgentRuntimeTests(unittest.TestCase):
     def test_runtime_delegates_transport_inputs_to_workflow(self) -> None:
         workflow = FakeWorkflow()
+        workflow.tool_call_count = 2
         run_store = RecordingRunStore()
         settings = Settings(_env_file=None)
         runtime = AgentRuntime(
@@ -122,6 +123,7 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(response.run_status, "completed")
         self.assertEqual(response.run_id, run_store.created["run_id"])
         self.assertEqual(run_store.saved[-1]["final_answer"], "delegated")
+        self.assertEqual(run_store.saved[-1]["tool_call_count"], 2)
         self.assertEqual(run_store.finished[0]["status"], "succeeded")
         self.assertEqual(
             [name for name, _ in run_store.checkpoints],

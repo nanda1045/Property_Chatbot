@@ -159,6 +159,9 @@ class AgentRuntime:
                 on_token=on_token,
                 history=history,
             )
+            state["tool_call_count"] = int(
+                getattr(workflow, "tool_call_count", state["tool_call_count"])
+            )
             response.run_id = state["run_id"]
             state["observations"].append(
                 {
@@ -213,6 +216,10 @@ class AgentRuntime:
         except Exception as error:
             error_data = {"type": type(error).__name__, "message": str(error)}
             if state["status"] not in TERMINAL_RUN_STATUSES:
+                if "workflow" in locals():
+                    state["tool_call_count"] = int(
+                        getattr(workflow, "tool_call_count", state["tool_call_count"])
+                    )
                 state["error"] = error_data
                 state["plan"][0]["status"] = "failed"
                 transition_agent_state(state, "failed")

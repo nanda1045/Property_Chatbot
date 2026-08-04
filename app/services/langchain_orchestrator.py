@@ -30,6 +30,9 @@ from app.schemas import ChatResponse, Source, UIComponent
 from app.services.intent_router import get_intent_router
 from app.services.langchain_tools import build_langchain_tools
 from app.services.sql_approval import draft_sql_for_approval, validate_drafted_sql
+from app.tools.contracts import TrustedToolContext
+from app.tools.executor import ToolExecutor
+from app.tools.property_tools import build_property_tool_registry
 
 REVIEW_RE = re.compile(r"\b(?:reviews?|ratings?|testimonials?)\b", re.IGNORECASE)
 EVIDENCE_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
@@ -236,8 +239,19 @@ WEBSITE_BOILERPLATE_PATTERNS = [
 class LangChainOrchestrator:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.tools = {tool.name: tool for tool in build_langchain_tools(settings)}
+        self.tool_executor = ToolExecutor(
+            build_property_tool_registry(settings),
+            max_tool_calls=12,
+        )
+        self.tools = {
+            tool.name: tool
+            for tool in build_langchain_tools(settings, executor=self.tool_executor)
+        }
         self.intent_router = get_intent_router(settings)
+
+    @property
+    def tool_call_count(self) -> int:
+        return self.tool_executor.budget.call_count
 
     def answer(
         self,
@@ -247,6 +261,7 @@ class LangChainOrchestrator:
         on_token: Callable[[str], None] | None = None,
         history: list[dict[str, Any]] | None = None,
     ) -> ChatResponse:
+        self.tool_executor.reset_execution()
         normalized_code = property_code.lower()
         tool_results: dict[str, Any] = {}
         components: list[UIComponent] = []
@@ -2495,8 +2510,23 @@ class LangChainOrchestrator:
         )
 
     def _call_tool(self, tool_name: str, **kwargs: Any) -> Any:
-        raw = self.tools[tool_name].invoke(kwargs)
-        return json.loads(raw)
+        arguments = dict(kwargs)
+        property_code = arguments.pop("property_code", None)
+        result = self.tool_executor.execute(
+            tool_name,
+            arguments,
+            TrustedToolContext(
+                property_code=property_code,
+                user_id=self.settings.runtime_user_id,
+            ),
+        )
+        if result.status == "failed":
+            error = result.error
+            raise RuntimeError(
+                f"{tool_name} failed ({error.type if error else 'unknown'}): "
+                f"{error.message if error else 'Unknown tool failure.'}"
+            )
+        return result.data
 
     @staticmethod
     def _wants_reviews(text: str) -> bool:

@@ -587,22 +587,20 @@
     },
     "generation": {
       "required_terms": [
-        "Pool with Cabanas",
-        "Community Features"
+        "can't answer",
+        "selected property",
+        "The Alexander"
       ],
       "forbidden_terms": [
-        "The Alexander (`176r`)",
+        "Pool with Cabanas",
+        "Community Features",
         "Indoor & Outdoor Swimming Pools"
       ],
       "expected_component_types": [],
       "expected_tool_keys": [
-        "property_profile",
-        "property_content"
+        "property_profile"
       ],
-      "expected_source_urls": [
-        "https://canfield-park.com/amenities/"
-      ],
-      "max_source_count": 1
+      "max_source_count": 0
     }
   },
   {

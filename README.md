@@ -16,6 +16,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 - Streamed responses for real LLM calls.
 - Embedded UI components for KPIs, trends, charge breakdowns, vacant units, balances, and comparisons.
 - LLM-assisted tool planning with backend validation and server-side `property_code` injection.
+- Typed tool registry with validated inputs/outputs, bounded execution, retry policy, and budgets.
 - Safe SQL approval workflow for custom structured rent-roll questions not covered by predefined tools.
 - Golden dataset and evaluation scripts for retrieval and answer quality.
 
@@ -24,6 +25,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 ```text
 app/agents/                  Agent runtime, workflow, planner, state, and policies
 app/memory/                  Durable agent run and execution-step stores
+app/tools/                   Typed contracts, registry, executor, and property tools
 app/                         FastAPI backend, services, tools, retrieval clients
 frontend/                    React/Vite chatbot UI
 scripts/                     Data loading, scraping, ingestion, and eval runners
@@ -266,9 +268,10 @@ flowchart LR
   Runtime --> Workflow["Property Chat Workflow"]
   Workflow --> Policies["Scope Policies"]
   Workflow --> Planner["LLM Planner"]
-  Workflow --> Tools["Tools"]
-  Tools --> MySQL["MySQL (Rent-Roll)"]
-  Tools --> Retrieval["Website Retrieval"]
+  Workflow --> Registry["Typed Tool Registry"]
+  Registry --> Executor["Bounded Tool Executor"]
+  Executor --> MySQL["MySQL (Rent-Roll)"]
+  Executor --> Retrieval["Website Retrieval"]
   Workflow --> SQLApproval["SQL Draft + Approval"]
   SQLApproval --> RunStore
   Workflow --> LLM["LLM Answer"]
@@ -310,6 +313,16 @@ start/completion/failure, approval request/decision, SQL execution, verification
 terminal completion or failure. Approval uses an atomic database claim, so duplicate
 clicks cannot execute the same pending SQL twice. Checkpoint loading is scoped by the
 backend-owned user identity, conversation, and active property.
+
+### Tool Execution Guarantees
+
+Every structured and retrieval tool is registered with a Pydantic input model, Pydantic
+output model, risk level, timeout, retry limit, idempotency policy, required trusted
+scopes, and maximum output size. The executor removes model-supplied trusted fields and
+injects the backend-selected property and user scope. It enforces the per-run tool-call
+budget, caches identical idempotent reads, records latency and operational trace events,
+and retries only transient failures with exponential backoff and jitter. Permanent
+errors and malformed outputs fail immediately with a structured error.
 
 ## Design Decisions
 

@@ -4,16 +4,17 @@ import json
 from typing import Any
 
 from langchain_core.tools import BaseTool, tool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.config import Settings
-from app.db.mysql import MySQLDatabase
-from app.retrieval.embeddings import build_embedder
-from app.retrieval.hybrid_store import HybridPropertyRetriever
-from app.services.rent_roll_repository import RentRollRepository
+from app.tools.contracts import TrustedToolContext
+from app.tools.executor import ToolExecutor
+from app.tools.property_tools import build_property_tool_registry
 
 
 class PropertyCodeInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     property_code: str = Field(
         description=(
             "The active property code selected by the user, for example 115r. "
@@ -24,7 +25,7 @@ class PropertyCodeInput(BaseModel):
 
 
 class TrendInput(PropertyCodeInput):
-    months: int = Field(default=12, ge=1, le=24)
+    months: int = Field(default=12, ge=1, le=36)
 
 
 class LimitInput(PropertyCodeInput):
@@ -52,14 +53,33 @@ def to_json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=True, sort_keys=True)
 
 
-def build_langchain_tools(settings: Settings) -> list[BaseTool]:
-    repository = RentRollRepository(MySQLDatabase(settings))
-    property_retriever = HybridPropertyRetriever(
-        chroma_path=settings.chroma_path,
-        chroma_collection=settings.chroma_collection,
-        bm25_path=settings.bm25_path,
-        embedder=build_embedder(settings),
-    )
+def build_langchain_tools(
+    settings: Settings,
+    executor: ToolExecutor | None = None,
+) -> list[BaseTool]:
+    """Expose compatibility wrappers backed by the controlled tool executor."""
+    executor = executor or ToolExecutor(build_property_tool_registry(settings))
+
+    def execute_json(
+        name: str,
+        arguments: dict[str, Any],
+        property_code: str | None = None,
+    ) -> str:
+        result = executor.execute(
+            name,
+            arguments,
+            TrustedToolContext(
+                property_code=property_code,
+                user_id=settings.runtime_user_id,
+            ),
+        )
+        if result.status == "failed":
+            error = result.error
+            raise RuntimeError(
+                f"{name} failed ({error.type if error else 'unknown'}): "
+                f"{error.message if error else 'Unknown tool failure.'}"
+            )
+        return to_json(result.data)
 
     @tool(args_schema=PropertyCodeInput)
     def get_property_profile(property_code: str) -> str:
@@ -69,7 +89,7 @@ def build_langchain_tools(settings: Settings) -> list[BaseTool]:
         display fields such as property name, address, and website URL. This
         tool is not for cross-property search or comparison.
         """
-        return to_json(repository.get_property_profile(property_code))
+        return execute_json("get_property_profile", {}, property_code)
 
     @tool
     def list_properties() -> str:
@@ -79,7 +99,7 @@ def build_langchain_tools(settings: Settings) -> list[BaseTool]:
         different from the active property. Do not switch the active property
         based on this result.
         """
-        return to_json(repository.list_properties())
+        return execute_json("list_properties", {})
 
     @tool(args_schema=PropertyCodeInput)
     def get_report_periods(property_code: str) -> str:
@@ -88,7 +108,7 @@ def build_langchain_tools(settings: Settings) -> list[BaseTool]:
         Use this before answering date-specific structured questions. If the
         requested year or month is missing, do not substitute another period.
         """
-        return to_json(repository.get_report_periods(property_code))
+        return execute_json("get_report_periods", {}, property_code)
 
     @tool(args_schema=PropertyCodeInput)
     def get_latest_property_kpis(property_code: str) -> str:
@@ -98,7 +118,7 @@ def build_langchain_tools(settings: Settings) -> list[BaseTool]:
         lease charges, and vacant unit count for the latest available report
         month. Use this for latest/current KPI questions only.
         """
-        return to_json(repository.get_latest_kpis(property_code))
+        return execute_json("get_latest_property_kpis", {}, property_code)
 
     @tool(args_schema=TrendInput)
     def get_occupancy_trend(property_code: str, months: int = 12) -> str:
@@ -108,7 +128,7 @@ def build_langchain_tools(settings: Settings) -> list[BaseTool]:
         The result is property-scoped and should not be used for unrelated
         rent, balance, or charge trends.
         """
-        return to_json(repository.get_occupancy_trend(property_code, months=months))
+        return execute_json("get_occupancy_trend", {"months": months}, property_code)
 
     @tool(args_schema=LimitInput)
     def get_charge_breakdown(property_code: str, limit: int = 10) -> str:
@@ -118,7 +138,7 @@ def build_langchain_tools(settings: Settings) -> list[BaseTool]:
         breakdowns. This is not a unit-level charge-detail tool and should not
         be used to calculate unsupported grouped aggregates.
         """
-        return to_json(repository.get_charge_breakdown(property_code, limit=limit))
+        return execute_json("get_charge_breakdown", {"limit": limit}, property_code)
 
     @tool(args_schema=LimitInput)
     def get_top_balances(property_code: str, limit: int = 10) -> str:
@@ -129,7 +149,7 @@ def build_langchain_tools(settings: Settings) -> list[BaseTool]:
         to calculate full-property averages, medians, rates, or grouped balance
         aggregates because it is a partial ranked result.
         """
-        return to_json(repository.get_top_balances(property_code, limit=limit))
+        return execute_json("get_top_balances", {"limit": limit}, property_code)
 
     @tool(args_schema=LimitInput)
     def get_vacant_units(property_code: str, limit: int = 20) -> str:
@@ -139,7 +159,7 @@ def build_langchain_tools(settings: Settings) -> list[BaseTool]:
         bedroom categories, square footage, or market rent. Do not use it to
         calculate unsupported vacancy rates by category.
         """
-        return to_json(repository.get_vacant_units(property_code, limit=limit))
+        return execute_json("get_vacant_units", {"limit": limit}, property_code)
 
     @tool(args_schema=PropertyCodeInput)
     def get_rent_by_unit_type(property_code: str) -> str:
@@ -150,7 +170,7 @@ def build_langchain_tools(settings: Settings) -> list[BaseTool]:
         rents, median rent, lease charges by unit type, or arbitrary SQL-style
         aggregates.
         """
-        return to_json(repository.get_rent_by_unit_type(property_code))
+        return execute_json("get_rent_by_unit_type", {}, property_code)
 
     @tool(args_schema=SearchContentInput)
     def search_property_content(
@@ -167,25 +187,10 @@ def build_langchain_tools(settings: Settings) -> list[BaseTool]:
         location, and fees. If evidence is weak or missing, say the selected
         property sample does not contain matching website evidence.
         """
-        results = property_retriever.search(
-            query=query,
-            property_code=property_code,
-            page_type=page_type,
-            n_results=n_results,
-        )
-        return to_json(
-            [
-                {
-                    "id": result.id,
-                    "content": result.content,
-                    "distance": result.distance,
-                    "score": result.score,
-                    "vector_rank": result.vector_rank,
-                    "keyword_rank": result.keyword_rank,
-                    "metadata": result.metadata,
-                }
-                for result in results
-            ]
+        return execute_json(
+            "search_property_content",
+            {"query": query, "page_type": page_type, "n_results": n_results},
+            property_code,
         )
 
     return [
