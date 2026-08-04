@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     embedding_cache_path: Path = Path("Data/models/sentence-transformers")
 
     default_property_code: str = "115r"
+    runtime_user_id: str = "local-user"
     default_llm_provider: str = "anthropic"
     default_llm_model: str = "claude-haiku-4-5-20251001"
 

@@ -11,11 +11,11 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from app.agents.runtime import AgentRuntime
 from app.core.config import Settings, get_settings
 from app.db.mysql import MySQLDatabase
 from app.schemas import ChatRequest, ChatResponse, SqlApprovalRequest, UIComponent
 from app.services.conversation_memory import ConversationMemory
-from app.services.langchain_orchestrator import LangChainOrchestrator
 from app.services.rent_roll_repository import RentRollRepository
 from app.services.sql_approval import execute_approved_sql
 
@@ -85,12 +85,14 @@ def properties(settings: SettingsDep) -> dict[str, list[dict]]:
 def chat(request: ChatRequest, settings: SettingsDep) -> ChatResponse:
     conversation_id = request.conversation_id or str(uuid4())
     history = conversation_memory.get(conversation_id, request.property_code)
-    orchestrator = LangChainOrchestrator(settings)
-    response = orchestrator.answer(
+    runtime = AgentRuntime(settings)
+    response = runtime.answer(
         property_code=request.property_code,
         message=request.message,
         model=request.model,
         history=history,
+        conversation_id=conversation_id,
+        user_id=settings.runtime_user_id,
     )
     response.conversation_id = conversation_id
     conversation_memory.add(
@@ -156,13 +158,15 @@ def chat_stream(request: ChatRequest, settings: SettingsDep) -> StreamingRespons
             try:
                 conversation_id = request.conversation_id or str(uuid4())
                 history = conversation_memory.get(conversation_id, request.property_code)
-                orchestrator = LangChainOrchestrator(settings)
-                response = orchestrator.answer(
+                runtime = AgentRuntime(settings)
+                response = runtime.answer(
                     property_code=request.property_code,
                     message=request.message,
                     model=request.model,
                     on_token=publish_token,
                     history=history,
+                    conversation_id=conversation_id,
+                    user_id=settings.runtime_user_id,
                 )
                 response.conversation_id = conversation_id
                 conversation_memory.add(

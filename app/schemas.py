@@ -42,6 +42,8 @@ class ChatResponse(BaseModel):
     property_code: str
     model: str
     conversation_id: str | None = None
+    run_id: str | None = None
+    run_status: str | None = None
     answer_markdown: str
     components: list[UIComponent] = Field(default_factory=list)
     sources: list[Source] = Field(default_factory=list)

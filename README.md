@@ -22,12 +22,15 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 ## Project Structure
 
 ```text
-app/                         FastAPI backend, orchestration, tools, retrieval clients
+app/agents/                  Agent runtime, workflow, planner, state, and policies
+app/memory/                  Durable agent run and execution-step stores
+app/                         FastAPI backend, services, tools, retrieval clients
 frontend/                    React/Vite chatbot UI
 scripts/                     Data loading, scraping, ingestion, and eval runners
 Data/                        Structured input/output data and retrieval indexes
 config/property_sources.json Property website source map
 evals/                       Golden datasets and evaluation reports
+sql/migrations/              Ordered MySQL agent-runtime migrations
 ```
 
 ## Setup
@@ -123,7 +126,15 @@ uv run python scripts/load_rent_roll_mysql.py --reset
 
 The loader reads the rent-roll Excel files in `Data/RentRoll_LeaseCharges_NamesRedacted copy/` and creates normalized MySQL tables keyed by `property_code`.
 
-9. First-time setup only: scrape websites and build retrieval indexes:
+9. Apply the agent-runtime database migrations:
+
+```bash
+uv run python scripts/run_migrations.py
+```
+
+The migration runner is idempotent and records the checksum of every applied migration.
+
+10. First-time setup only: scrape websites and build retrieval indexes:
 
 ```bash
 uv run python scripts/scrape_property_sites.py
@@ -132,13 +143,13 @@ uv run python scripts/ingest_unstructured.py --reset
 
 The first retrieval-ingestion run may download the local sentence-transformer embedding model into `Data/models/sentence-transformers`, so it needs internet access once.
 
-10. In a second terminal, start the backend:
+11. In a second terminal, start the backend:
 
 ```bash
 uv run aker-api
 ```
 
-11. In a third terminal, start the frontend:
+12. In a third terminal, start the frontend:
 
 ```bash
 cd frontend
@@ -146,7 +157,7 @@ npm install
 npm run dev
 ```
 
-12. Open the app in your browser:
+13. Open the app in your browser:
 
 ```text
 http://127.0.0.1:5173/
@@ -234,37 +245,41 @@ The system is organized as a scoped retrieval and orchestration pipeline.
 flowchart LR
   User["User"] --> UI["React Chat UI"]
   UI --> API["FastAPI"]
-  API --> Orchestrator["Backend Orchestrator"]
-  Orchestrator --> Planner["LLM Planner"]
-  Orchestrator --> Tools["Tools"]
+  API --> Runtime["Agent Runtime"]
+  Runtime --> RunStore["Persistent Run Store"]
+  Runtime --> Workflow["Property Chat Workflow"]
+  Workflow --> Policies["Scope Policies"]
+  Workflow --> Planner["LLM Planner"]
+  Workflow --> Tools["Tools"]
   Tools --> MySQL["MySQL (Rent-Roll)"]
   Tools --> Retrieval["Website Retrieval"]
-  Orchestrator --> SQLApproval["SQL Draft + Approval"]
-  Orchestrator --> LLM["LLM Answer"]
-  Orchestrator --> Response["Response + UI Components"]
+  Workflow --> SQLApproval["SQL Draft + Approval"]
+  Workflow --> LLM["LLM Answer"]
+  Workflow --> Response["Response + UI Components"]
   Response --> UI
 ```
 
 1. The user selects a property in the React UI.
 2. The frontend sends `property_code`, selected `model`, and the user message to FastAPI.
-3. The backend loads the selected property profile and normalizes the active `property_code`.
-4. The orchestrator creates `LLMToolPlanner`. The planner first applies deterministic guardrails for ambiguity, PII, unsafe SQL, unsupported external data, and cross-property requests.
-5. For real LLM models, the planner can classify the request as `structured`, `retrieval`, `hybrid`, `sql_approval`, `unsupported`, or `clarification`.
-6. If the LLM planner cannot return a valid plan, the system falls back to deterministic planning.
-7. Tool names are validated against an allowlist; property scoping is injected server-side, never trusted from the LLM.
-8. Common structured analytics are routed to bounded SQL-backed tools such as latest KPIs, occupancy trend, charge breakdown, top balances, vacant units, rent by unit type, and rent vs lease charges.
-9. Website questions are routed to property-scoped retrieval over scraped website chunks.
-10. Custom structured metrics that are not covered by predefined tools can route to `sql_approval`.
-11. In `sql_approval`, the LLM drafts a read-only SQL query with `:property_code`; it does not execute SQL.
-12. The backend validates SQL drafts before they reach the UI. The guard checks allowed tables and columns, blocks PII, blocks unsafe operations, requires active-property scoping, rejects comments/semicolons/UNION, and requires row limits for row-level queries.
-13. Valid SQL drafts are shown in the UI for user approval before execution.
-14. Approved SQL is executed only through the backend approval endpoint, which binds the active `property_code` server-side.
-15. Every structured SQL query is filtered by active `property_code`.
-16. Every retrieval query is filtered by active `property_code` metadata.
-17. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
-18. Retrieved chunks are annotated with evidence confidence before being used in the answer.
-19. The API returns Markdown, sources, tool results, and structured UI component definitions.
-20. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
+3. The agent runtime creates a durable run scoped by backend-owned user identity, conversation, and active property. Each response includes `run_id` and `run_status`.
+4. The backend loads the selected property profile and normalizes the active `property_code`.
+5. The workflow creates `LLMToolPlanner`. The planner first applies deterministic guardrails for ambiguity, PII, unsafe SQL, unsupported external data, and cross-property requests.
+6. For real LLM models, the planner can classify the request as `structured`, `retrieval`, `hybrid`, `sql_approval`, `unsupported`, or `clarification`.
+7. If the LLM planner cannot return a valid plan, the system falls back to deterministic planning.
+8. Tool names are validated against an allowlist; property scoping is injected server-side, never trusted from the LLM.
+9. Common structured analytics are routed to bounded SQL-backed tools such as latest KPIs, occupancy trend, charge breakdown, top balances, vacant units, rent by unit type, and rent vs lease charges.
+10. Website questions are routed to property-scoped retrieval over scraped website chunks.
+11. Custom structured metrics that are not covered by predefined tools can route to `sql_approval`.
+12. In `sql_approval`, the LLM drafts a read-only SQL query with `:property_code`; it does not execute SQL.
+13. The backend validates SQL drafts before they reach the UI. The guard checks allowed tables and columns, blocks PII, blocks unsafe operations, requires active-property scoping, rejects comments/semicolons/UNION, and requires row limits for row-level queries.
+14. Valid SQL drafts are shown in the UI for user approval before execution.
+15. Approved SQL is executed only through the backend approval endpoint, which binds the active `property_code` server-side.
+16. Every structured SQL query is filtered by active `property_code`.
+17. Every retrieval query is filtered by active `property_code` metadata.
+18. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
+19. Retrieved chunks are annotated with evidence confidence before being used in the answer.
+20. The API returns Markdown, sources, tool results, and structured UI component definitions.
+21. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
 
 ## Design Decisions
 

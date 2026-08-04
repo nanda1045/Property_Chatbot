@@ -49,3 +49,26 @@ class MySQLDatabase:
 
     def fetch_sql(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         return self.fetch_all(query, params)
+
+    def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
+        """Execute one write statement and return its affected-row count."""
+        connection = mysql.connector.connect(
+            host=self.settings.mysql_host,
+            port=self.settings.mysql_port,
+            user=self.settings.mysql_user,
+            password=self.settings.mysql_password,
+            database=self.settings.mysql_database,
+        )
+        try:
+            cursor = connection.cursor()
+            try:
+                cursor.execute(query, params)
+                connection.commit()
+                return cursor.rowcount
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                cursor.close()
+        finally:
+            connection.close()
