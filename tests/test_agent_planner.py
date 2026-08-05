@@ -35,6 +35,24 @@ class PlannerPolicyTests(unittest.TestCase):
         self.assertEqual(validated.route, "clarification")
         self.assertIsNotNone(validated.clarification_question)
 
+    def test_duplicate_planned_actions_are_removed(self) -> None:
+        plan = ToolPlan(
+            route="hybrid",
+            structured_tools=[
+                {"name": "get_occupancy_trend", "args": {"months": 12}},
+                {"name": "get_occupancy_trend", "args": {"months": 12}},
+            ],
+            retrieval_queries=[
+                {"query": "parking", "page_type": "amenities", "n_results": 5},
+                {"query": "parking", "page_type": "amenities", "n_results": 5},
+            ],
+        )
+
+        validated = validate_tool_plan(plan, {"get_occupancy_trend"})
+
+        self.assertEqual(len(validated.structured_tools), 1)
+        self.assertEqual(len(validated.retrieval_queries), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

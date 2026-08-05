@@ -17,6 +17,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 - Embedded UI components for KPIs, trends, charge breakdowns, vacant units, balances, and comparisons.
 - LLM-assisted tool planning with backend validation and server-side `property_code` injection.
 - Typed tool registry with validated inputs/outputs, bounded execution, retry policy, and budgets.
+- Bounded plan-execute-observe-decide loop with configurable run limits.
 - Safe SQL approval workflow for custom structured rent-roll questions not covered by predefined tools.
 - Golden dataset and evaluation scripts for retrieval and answer quality.
 
@@ -268,7 +269,8 @@ flowchart LR
   Runtime --> Workflow["Property Chat Workflow"]
   Workflow --> Policies["Scope Policies"]
   Workflow --> Planner["LLM Planner"]
-  Workflow --> Registry["Typed Tool Registry"]
+  Planner --> Loop["Bounded Agent Loop"]
+  Loop --> Registry["Typed Tool Registry"]
   Registry --> Executor["Bounded Tool Executor"]
   Executor --> MySQL["MySQL (Rent-Roll)"]
   Executor --> Retrieval["Website Retrieval"]
@@ -285,21 +287,22 @@ flowchart LR
 4. The backend loads the selected property profile and normalizes the active `property_code`.
 5. The workflow creates `LLMToolPlanner`. The planner first applies deterministic guardrails for ambiguity, PII, unsafe SQL, unsupported external data, and cross-property requests.
 6. For real LLM models, the planner can classify the request as `structured`, `retrieval`, `hybrid`, `sql_approval`, `unsupported`, or `clarification`.
-7. If the LLM planner cannot return a valid plan, the system falls back to deterministic planning.
-8. Tool names are validated against an allowlist; property scoping is injected server-side, never trusted from the LLM.
-9. Common structured analytics are routed to bounded SQL-backed tools such as latest KPIs, occupancy trend, charge breakdown, top balances, vacant units, rent by unit type, and rent vs lease charges.
-10. Website questions are routed to property-scoped retrieval over scraped website chunks.
-11. Custom structured metrics that are not covered by predefined tools can route to `sql_approval`.
-12. In `sql_approval`, the LLM drafts a read-only SQL query with `:property_code`; it does not execute SQL.
-13. The backend validates SQL drafts before they reach the UI. The guard checks allowed tables and columns, blocks PII, blocks unsafe operations, requires active-property scoping, rejects comments/semicolons/UNION, and requires row limits for row-level queries.
-14. Valid SQL drafts are shown in the UI for user approval before execution.
-15. Approved SQL is executed only through the backend approval endpoint, which binds the active `property_code` server-side.
-16. Every structured SQL query is filtered by active `property_code`.
-17. Every retrieval query is filtered by active `property_code` metadata.
-18. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
-19. Retrieved chunks are annotated with evidence confidence before being used in the answer.
-20. The API returns Markdown, sources, tool results, and structured UI component definitions.
-21. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
+7. Invalid planner output is retried within a fixed retry budget; if no valid plan is produced, the system falls back to deterministic planning.
+8. Tool names are validated against an allowlist and identical planned actions are deduplicated; property scoping is injected server-side, never trusted from the LLM.
+9. The bounded loop executes one tool action, validates and records its observation, then decides whether to continue. It stops on completion, approval, failure, repetition, or a configured limit.
+10. Common structured analytics are routed to bounded SQL-backed tools such as latest KPIs, occupancy trend, charge breakdown, top balances, vacant units, rent by unit type, and rent vs lease charges.
+11. Website questions are routed to property-scoped retrieval over scraped website chunks.
+12. Custom structured metrics that are not covered by predefined tools can route to `sql_approval`.
+13. In `sql_approval`, the LLM drafts a read-only SQL query with `:property_code`; it does not execute SQL.
+14. The backend validates SQL drafts before they reach the UI. The guard checks allowed tables and columns, blocks PII, blocks unsafe operations, requires active-property scoping, rejects comments/semicolons/UNION, and requires row limits for row-level queries.
+15. Valid SQL drafts are shown in the UI for user approval before execution.
+16. Approved SQL is executed only through the backend approval endpoint, which binds the active `property_code` server-side.
+17. Every structured SQL query is filtered by active `property_code`.
+18. Every retrieval query is filtered by active `property_code` metadata.
+19. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
+20. Retrieved chunks are annotated with evidence confidence before being used in the answer.
+21. The API returns Markdown, sources, tool results, and structured UI component definitions.
+22. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
 
 ### Agent Run Lifecycle
 
@@ -323,6 +326,26 @@ injects the backend-selected property and user scope. It enforces the per-run to
 budget, caches identical idempotent reads, records latency and operational trace events,
 and retries only transient failures with exponential backoff and jitter. Permanent
 errors and malformed outputs fail immediately with a structured error.
+
+### Bounded Agent Loop
+
+The workflow uses a plan-execute-observe-decide controller rather than handing an LLM
+an unrestricted tool loop. Each decision can inspect sanitized observations from prior
+steps, but it can select only one validated action at a time. Identical repeated actions
+are rejected even when they use different plan labels. The controller and tool executor
+jointly enforce these per-run settings:
+
+| Environment variable | Default | Purpose |
+| --- | ---: | --- |
+| `AGENT_MAX_STEPS` | `8` | Maximum loop continuation steps |
+| `AGENT_MAX_TOOL_CALLS` | `12` | Maximum tool executions across the run |
+| `AGENT_MAX_PLANNER_RETRIES` | `2` | Retries after an invalid planner response |
+| `AGENT_MAX_SQL_APPROVALS` | `1` | SQL approval interrupts allowed per run |
+| `AGENT_MAX_RUN_SECONDS` | `60` | Total wall-clock execution bound |
+
+The durable run checkpoint stores the sanitized action plan, observations, planner
+attempt count, SQL approval count, and actual tool-call count. It does not store or
+expose private model reasoning.
 
 ## Design Decisions
 

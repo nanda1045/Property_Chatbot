@@ -592,6 +592,7 @@ def validate_tool_plan(
     structured_allowlist: set[str],
 ) -> ToolPlan:
     cleaned_tools: list[StructuredToolCall] = []
+    seen_tool_calls: set[str] = set()
 
     for tool_call in plan.structured_tools:
         if tool_call.name not in structured_allowlist:
@@ -612,9 +613,19 @@ def validate_tool_plan(
             except (TypeError, ValueError):
                 args.pop("months", None)
 
+        signature = json.dumps(
+            {"name": tool_call.name, "args": args},
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        if signature in seen_tool_calls:
+            continue
+        seen_tool_calls.add(signature)
         cleaned_tools.append(StructuredToolCall(name=tool_call.name, args=args))
 
     cleaned_queries: list[RetrievalQuery] = []
+    seen_retrieval_queries: set[str] = set()
     for query in plan.retrieval_queries:
         clean_query = (query.query or "").strip()
         if not clean_query:
@@ -628,9 +639,16 @@ def validate_tool_plan(
         n_results = max(1, min(10, n_results))
         page_type = query.page_type if query.page_type in ALLOWED_PAGE_TYPES else None
 
-        cleaned_queries.append(
-            RetrievalQuery(query=clean_query, page_type=page_type, n_results=n_results)
+        cleaned_query = RetrievalQuery(
+            query=clean_query,
+            page_type=page_type,
+            n_results=n_results,
         )
+        signature = cleaned_query.model_dump_json()
+        if signature in seen_retrieval_queries:
+            continue
+        seen_retrieval_queries.add(signature)
+        cleaned_queries.append(cleaned_query)
 
     route = plan.route
     unsupported_reason = plan.unsupported_reason

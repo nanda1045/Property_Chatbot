@@ -94,8 +94,28 @@ class AgentRuntimeTests(unittest.TestCase):
     def test_runtime_delegates_transport_inputs_to_workflow(self) -> None:
         workflow = FakeWorkflow()
         workflow.tool_call_count = 2
+        workflow.execution_plan = [
+            {"key": "kpis", "tool_name": "get_latest_property_kpis", "arguments": {}}
+        ]
+        workflow.execution_observations = [
+            {
+                "step": 1,
+                "action_key": "kpis",
+                "tool_name": "get_latest_property_kpis",
+                "status": "succeeded",
+                "duration_ms": 4,
+                "data": {"current": {}},
+                "error": None,
+            }
+        ]
+        workflow.planner_attempt_count = 1
+        workflow.sql_approval_count = 0
         run_store = RecordingRunStore()
-        settings = Settings(_env_file=None)
+        settings = Settings(
+            _env_file=None,
+            agent_max_steps=6,
+            agent_max_tool_calls=9,
+        )
         runtime = AgentRuntime(
             settings,
             workflow_factory=lambda _: workflow,
@@ -124,6 +144,19 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(response.run_id, run_store.created["run_id"])
         self.assertEqual(run_store.saved[-1]["final_answer"], "delegated")
         self.assertEqual(run_store.saved[-1]["tool_call_count"], 2)
+        self.assertEqual(run_store.created["max_steps"], 6)
+        self.assertEqual(run_store.created["max_tool_calls"], 9)
+        self.assertEqual(
+            run_store.saved[-1]["plan"][0]["actions"][0]["tool_name"],
+            "get_latest_property_kpis",
+        )
+        loop_observation = next(
+            observation
+            for observation in run_store.saved[-1]["observations"]
+            if observation.get("type") == "bounded_agent_loop"
+        )
+        self.assertEqual(loop_observation["planner_attempts"], 1)
+        self.assertEqual(loop_observation["steps"], 1)
         self.assertEqual(run_store.finished[0]["status"], "succeeded")
         self.assertEqual(
             [name for name, _ in run_store.checkpoints],

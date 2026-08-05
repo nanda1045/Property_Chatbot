@@ -11,9 +11,18 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
+from app.agents.loop import (
+    AgentAction,
+    AgentLoopResult,
+    AgentObservation,
+    BoundedAgentLoop,
+    ExecutionLimits,
+    LoopDecision,
+)
 from app.agents.planner import (
     UNSUPPORTED_FACT_TERMS,
     LLMToolPlanner,
+    RetrievalQuery,
     StructuredToolCall,
     ToolPlan,
     validate_tool_plan,
@@ -241,17 +250,46 @@ class LangChainOrchestrator:
         self.settings = settings
         self.tool_executor = ToolExecutor(
             build_property_tool_registry(settings),
-            max_tool_calls=12,
+            max_tool_calls=settings.agent_max_tool_calls,
         )
         self.tools = {
             tool.name: tool
             for tool in build_langchain_tools(settings, executor=self.tool_executor)
         }
         self.intent_router = get_intent_router(settings)
+        self._execution_loop: BoundedAgentLoop | None = None
+        self._loop_result: AgentLoopResult | None = None
 
     @property
     def tool_call_count(self) -> int:
         return self.tool_executor.budget.call_count
+
+    @property
+    def execution_steps(self) -> int:
+        return self._execution_loop.step_count if self._execution_loop else 0
+
+    @property
+    def execution_plan(self) -> list[dict[str, Any]]:
+        if not self._execution_loop:
+            return []
+        return [action.model_dump(mode="json") for action in self._execution_loop.actions]
+
+    @property
+    def execution_observations(self) -> list[dict[str, Any]]:
+        if not self._execution_loop:
+            return []
+        return [
+            observation.model_dump(mode="json")
+            for observation in self._execution_loop.observations
+        ]
+
+    @property
+    def planner_attempt_count(self) -> int:
+        return self._execution_loop.planner_attempts if self._execution_loop else 0
+
+    @property
+    def sql_approval_count(self) -> int:
+        return self._execution_loop.sql_approval_count if self._execution_loop else 0
 
     def answer(
         self,
@@ -262,12 +300,23 @@ class LangChainOrchestrator:
         history: list[dict[str, Any]] | None = None,
     ) -> ChatResponse:
         self.tool_executor.reset_execution()
+        self._execution_loop = BoundedAgentLoop(
+            ExecutionLimits(
+                max_steps=self.settings.agent_max_steps,
+                max_tool_calls=self.settings.agent_max_tool_calls,
+                max_planner_retries=self.settings.agent_max_planner_retries,
+                max_sql_approvals=self.settings.agent_max_sql_approvals,
+                max_run_seconds=self.settings.agent_max_run_seconds,
+            )
+        )
+        self._loop_result = None
         normalized_code = property_code.lower()
         tool_results: dict[str, Any] = {}
         components: list[UIComponent] = []
         sources: list[Source] = []
 
         profile = self._call_tool("get_property_profile", property_code=normalized_code)
+        self._execution_loop.ensure_within_duration()
         if profile is None:
             return ChatResponse(
                 property_code=normalized_code,
@@ -277,6 +326,7 @@ class LangChainOrchestrator:
 
         tool_results["property_profile"] = profile
         scope_conflict = self._property_scope_conflict(message, profile)
+        self._execution_loop.ensure_within_duration()
         if scope_conflict:
             return ChatResponse(
                 property_code=normalized_code,
@@ -297,6 +347,7 @@ class LangChainOrchestrator:
             message=message,
             history=history,
         )
+        self._execution_loop.ensure_within_duration()
         if component_followup:
             tool_results.update(component_followup.get("tool_results") or {})
             return ChatResponse(
@@ -380,14 +431,16 @@ class LangChainOrchestrator:
                 )
                 return str(response.content)
 
-            plan = planner.plan_with_llm(
-                property_code=normalized_code,
-                property_name=profile.get("property_name") or normalized_code,
-                message=message,
-                structured_tool_descriptions=structured_tool_desc,
-                retrieval_tool_description=retrieval_desc,
-                data_sources_description=data_sources_desc,
-                chat_model=chat_invoke,
+            plan = self._execution_loop.plan_with_retries(
+                lambda: planner.plan_with_llm(
+                    property_code=normalized_code,
+                    property_name=profile.get("property_name") or normalized_code,
+                    message=message,
+                    structured_tool_descriptions=structured_tool_desc,
+                    retrieval_tool_description=retrieval_desc,
+                    data_sources_description=data_sources_desc,
+                    chat_model=chat_invoke,
+                )
             )
 
         if not plan:
@@ -424,6 +477,7 @@ class LangChainOrchestrator:
             )
 
         if plan.route == "sql_approval":
+            self._execution_loop.request_sql_approval()
             if not chat_invoke or not plan.sql_request:
                 return ChatResponse(
                     property_code=normalized_code,
@@ -444,6 +498,7 @@ class LangChainOrchestrator:
                 sql_request=plan.sql_request,
                 chat_model=chat_invoke,
             )
+            self._execution_loop.ensure_within_duration()
             if not drafted:
                 return ChatResponse(
                     property_code=normalized_code,
@@ -528,32 +583,6 @@ class LangChainOrchestrator:
         wants_retrieval = plan.route in {"retrieval", "hybrid"}
 
         requested_years = self._requested_years(message)
-        if wants_structured and requested_years:
-            report_periods = self._call_tool("get_report_periods", property_code=normalized_code)
-            tool_results["report_periods"] = report_periods
-
-            unavailable_years = [
-                year for year in requested_years if year not in report_periods.get("years", [])
-            ]
-
-            if unavailable_years:
-                return ChatResponse(
-                    property_code=normalized_code,
-                    model=model,
-                    answer_markdown=self._with_scope_note(
-                        self._unavailable_year_answer(
-                            profile=profile,
-                            property_code=normalized_code,
-                            requested_years=unavailable_years,
-                            report_periods=report_periods,
-                        ),
-                        scope_note,
-                    ),
-                    components=[],
-                    sources=[],
-                    tool_results=tool_results,
-                )
-
         if wants_structured:
             unsupported_metric = self._unsupported_structured_aggregate(message, intent)
             if unsupported_metric:
@@ -573,27 +602,35 @@ class LangChainOrchestrator:
                     tool_results=tool_results,
                 )
 
-            self._collect_structured_from_plan(
+        retrieval_results, unavailable_years = self._execute_tool_plan(
+            property_code=normalized_code,
+            message=message,
+            plan=plan,
+            intent=intent,
+            requested_years=requested_years if wants_structured else [],
+            tool_results=tool_results,
+            components=components,
+        )
+
+        if unavailable_years:
+            return ChatResponse(
                 property_code=normalized_code,
-                message=message,
+                model=model,
+                answer_markdown=self._with_scope_note(
+                    self._unavailable_year_answer(
+                        profile=profile,
+                        property_code=normalized_code,
+                        requested_years=unavailable_years,
+                        report_periods=tool_results["report_periods"],
+                    ),
+                    scope_note,
+                ),
+                components=[],
+                sources=[],
                 tool_results=tool_results,
-                components=components,
-                structured_tools=plan.structured_tools,
-                intent=intent,
             )
 
         if wants_retrieval:
-            retrieval_results: list[dict[str, Any]] = []
-
-            for query in plan.retrieval_queries:
-                results = self._call_tool(
-                    "search_property_content",
-                    property_code=normalized_code,
-                    query=query.query,
-                    page_type=query.page_type,
-                    n_results=query.n_results,
-                )
-                retrieval_results.extend(results)
 
             retrieval_results = self._annotate_retrieval_evidence(message, retrieval_results)
 
@@ -642,6 +679,7 @@ class LangChainOrchestrator:
                         tool_results=tool_results,
                     )
 
+        self._execution_loop.ensure_within_duration()
         answer_markdown = self._generate_answer(
             model=model,
             property_code=normalized_code,
@@ -652,6 +690,7 @@ class LangChainOrchestrator:
             on_token=on_token,
             history=history,
         )
+        self._execution_loop.ensure_within_duration()
 
         if scope_note:
             answer_markdown = self._remove_scope_boilerplate(answer_markdown)
@@ -667,6 +706,142 @@ class LangChainOrchestrator:
             sources=sources,
             tool_results=tool_results,
         )
+
+    def _execute_tool_plan(
+        self,
+        *,
+        property_code: str,
+        message: str,
+        plan: ToolPlan,
+        intent: str | None,
+        requested_years: list[int],
+        tool_results: dict[str, Any],
+        components: list[UIComponent],
+    ) -> tuple[list[dict[str, Any]], list[int]]:
+        """Execute one planned tool action before observing and deciding again."""
+        if self._execution_loop is None:
+            raise RuntimeError("agent execution loop was not initialized")
+
+        actions: list[AgentAction] = []
+        structured_calls: dict[str, StructuredToolCall] = {}
+        retrieval_queries: dict[str, RetrievalQuery] = {}
+        seen_signatures: set[str] = set()
+
+        def add_action(action: AgentAction) -> None:
+            signature = action.signature()
+            if signature in seen_signatures:
+                return
+            seen_signatures.add(signature)
+            actions.append(action)
+
+        if requested_years:
+            add_action(
+                AgentAction(
+                    key="report_periods:preflight",
+                    tool_name="get_report_periods",
+                )
+            )
+
+        if plan.route in {"structured", "hybrid"}:
+            for index, tool_call in enumerate(plan.structured_tools, start=1):
+                if tool_call.name == "get_property_profile" and "property_profile" in tool_results:
+                    continue
+                action = AgentAction(
+                    key=f"structured:{index}:{tool_call.name}",
+                    tool_name=tool_call.name,
+                    arguments=dict(tool_call.args or {}),
+                )
+                before_count = len(actions)
+                add_action(action)
+                if len(actions) > before_count:
+                    structured_calls[action.key] = tool_call
+
+        if plan.route in {"retrieval", "hybrid"}:
+            for index, query in enumerate(plan.retrieval_queries, start=1):
+                action = AgentAction(
+                    key=f"retrieval:{index}",
+                    tool_name="search_property_content",
+                    arguments={
+                        "query": query.query,
+                        "page_type": query.page_type,
+                        "n_results": query.n_results,
+                    },
+                )
+                before_count = len(actions)
+                add_action(action)
+                if len(actions) > before_count:
+                    retrieval_queries[action.key] = query
+
+        unavailable_years: list[int] = []
+        retrieval_results: list[dict[str, Any]] = []
+
+        def decide(observations: tuple[AgentObservation, ...]) -> LoopDecision:
+            nonlocal unavailable_years
+            if observations and observations[-1].action_key == "report_periods:preflight":
+                report_periods = observations[-1].data or {}
+                unavailable_years = [
+                    year
+                    for year in requested_years
+                    if year not in report_periods.get("years", [])
+                ]
+                if unavailable_years:
+                    return LoopDecision(
+                        complete=True,
+                        reason="requested_report_period_unavailable",
+                    )
+
+            next_index = len(observations)
+            if next_index >= len(actions):
+                return LoopDecision(complete=True, reason="planned_actions_completed")
+            return LoopDecision(action=actions[next_index])
+
+        result_keys = {
+            "get_property_profile": "property_profile",
+            "get_report_periods": "report_periods",
+            "get_latest_property_kpis": "latest_kpis",
+            "get_occupancy_trend": "occupancy_trend",
+            "get_charge_breakdown": "charge_breakdown",
+            "get_top_balances": "top_balances",
+            "get_vacant_units": "vacant_units",
+            "get_rent_by_unit_type": "rent_by_unit_type",
+        }
+
+        def execute(action: AgentAction) -> Any:
+            if action.key == "report_periods:preflight":
+                report_periods = self._call_tool(
+                    "get_report_periods",
+                    property_code=property_code,
+                )
+                tool_results["report_periods"] = report_periods
+                return report_periods
+
+            tool_call = structured_calls.get(action.key)
+            if tool_call is not None:
+                self._collect_structured_from_plan(
+                    property_code=property_code,
+                    message=message,
+                    tool_results=tool_results,
+                    components=components,
+                    structured_tools=[tool_call],
+                    intent=intent,
+                )
+                return tool_results.get(result_keys[tool_call.name])
+
+            query = retrieval_queries.get(action.key)
+            if query is None:
+                raise RuntimeError(f"Unknown planned action: {action.key}")
+            results = self._call_tool(
+                "search_property_content",
+                property_code=property_code,
+                query=query.query,
+                page_type=query.page_type,
+                n_results=query.n_results,
+            )
+            retrieval_results.extend(results)
+            return results
+
+        self._loop_result = self._execution_loop.run(decide, execute)
+        return retrieval_results, unavailable_years
 
     def _collect_structured_from_plan(
         self,

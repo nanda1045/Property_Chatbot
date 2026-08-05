@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     default_llm_provider: str = "anthropic"
     default_llm_model: str = "claude-haiku-4-5-20251001"
 
+    agent_max_steps: int = Field(default=8, ge=1)
+    agent_max_tool_calls: int = Field(default=12, ge=1)
+    agent_max_planner_retries: int = Field(default=2, ge=0)
+    agent_max_sql_approvals: int = Field(default=1, ge=0)
+    agent_max_run_seconds: float = Field(default=60.0, gt=0)
+
     openai_api_key: str | None = Field(default=None, repr=False)
     anthropic_api_key: str | None = Field(default=None, repr=False)
 

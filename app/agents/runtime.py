@@ -107,6 +107,34 @@ class AgentRuntime:
     def _default_run_store_factory(settings: Settings) -> RunStore:
         return AgentRunStore(MySQLDatabase(settings))
 
+    @staticmethod
+    def _capture_workflow_execution(
+        state: AgentState,
+        workflow: AgentWorkflow,
+    ) -> None:
+        """Copy sanitized bounded-loop state into the durable run snapshot."""
+        state["tool_call_count"] = int(
+            getattr(workflow, "tool_call_count", state["tool_call_count"])
+        )
+        execution_plan = list(getattr(workflow, "execution_plan", []) or [])
+        execution_observations = list(
+            getattr(workflow, "execution_observations", []) or []
+        )
+        planner_attempts = int(getattr(workflow, "planner_attempt_count", 0))
+        sql_approval_count = int(getattr(workflow, "sql_approval_count", 0))
+        if state["plan"] and execution_plan:
+            state["plan"][0]["actions"] = execution_plan
+        if execution_plan or execution_observations or planner_attempts or sql_approval_count:
+            state["observations"].append(
+                {
+                    "type": "bounded_agent_loop",
+                    "planner_attempts": planner_attempts,
+                    "sql_approval_count": sql_approval_count,
+                    "steps": len(execution_observations),
+                    "observations": execution_observations,
+                }
+            )
+
     def answer(
         self,
         property_code: str,
@@ -125,6 +153,8 @@ class AgentRuntime:
             user_id=user_id or self.settings.runtime_user_id,
             property_code=property_code,
             user_goal=message,
+            max_steps=self.settings.agent_max_steps,
+            max_tool_calls=self.settings.agent_max_tool_calls,
         )
         run_store = self._run_store_factory(self.settings)
         run_store.create(state)
@@ -159,9 +189,7 @@ class AgentRuntime:
                 on_token=on_token,
                 history=history,
             )
-            state["tool_call_count"] = int(
-                getattr(workflow, "tool_call_count", state["tool_call_count"])
-            )
+            self._capture_workflow_execution(state, workflow)
             response.run_id = state["run_id"]
             state["observations"].append(
                 {
@@ -217,9 +245,7 @@ class AgentRuntime:
             error_data = {"type": type(error).__name__, "message": str(error)}
             if state["status"] not in TERMINAL_RUN_STATUSES:
                 if "workflow" in locals():
-                    state["tool_call_count"] = int(
-                        getattr(workflow, "tool_call_count", state["tool_call_count"])
-                    )
+                    self._capture_workflow_execution(state, workflow)
                 state["error"] = error_data
                 state["plan"][0]["status"] = "failed"
                 transition_agent_state(state, "failed")
