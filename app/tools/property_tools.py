@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
@@ -29,6 +30,14 @@ class TrendInput(StrictInput):
 
 class LimitInput(StrictInput):
     limit: int = Field(default=10, ge=1, le=50)
+
+
+class VacantUnitsInput(LimitInput):
+    report_month: date | None = None
+
+
+class ReportMonthInput(StrictInput):
+    report_month: date | None = None
 
 
 class SearchContentInput(StrictInput):
@@ -282,18 +291,26 @@ def build_property_tool_registry(
     )
     register(
         "get_vacant_units",
-        LimitInput,
+        VacantUnitsInput,
         VacantUnitsOutput,
         lambda tool_input, context: repository.get_vacant_units(
             _property_code(context),
             limit=tool_input.limit,
+            report_month=(
+                tool_input.report_month.isoformat() if tool_input.report_month else None
+            ),
         ),
     )
     register(
         "get_rent_by_unit_type",
-        EmptyInput,
+        ReportMonthInput,
         RentByUnitTypeOutput,
-        lambda _input, context: repository.get_rent_by_unit_type(_property_code(context)),
+        lambda tool_input, context: repository.get_rent_by_unit_type(
+            _property_code(context),
+            report_month=(
+                tool_input.report_month.isoformat() if tool_input.report_month else None
+            ),
+        ),
     )
 
     def search_content(tool_input: SearchContentInput, context: TrustedToolContext) -> list[dict]:

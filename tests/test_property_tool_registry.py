@@ -14,6 +14,8 @@ from app.tools.property_tools import build_property_tool_registry
 class FakeRepository:
     def __init__(self) -> None:
         self.occupancy_calls: list[tuple[str, int]] = []
+        self.vacancy_calls: list[tuple[str, int, str | None]] = []
+        self.rent_calls: list[tuple[str, str | None]] = []
 
     def get_property_profile(self, property_code: str):
         return {
@@ -58,10 +60,21 @@ class FakeRepository:
     def get_top_balances(self, property_code: str, limit: int = 10):
         return []
 
-    def get_vacant_units(self, property_code: str, limit: int = 20):
+    def get_vacant_units(
+        self,
+        property_code: str,
+        limit: int = 20,
+        report_month: str | None = None,
+    ):
+        self.vacancy_calls.append((property_code, limit, report_month))
         return []
 
-    def get_rent_by_unit_type(self, property_code: str):
+    def get_rent_by_unit_type(
+        self,
+        property_code: str,
+        report_month: str | None = None,
+    ):
+        self.rent_calls.append((property_code, report_month))
         return []
 
 
@@ -133,6 +146,26 @@ class PropertyToolRegistryTests(unittest.TestCase):
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(self.retriever.calls[0]["property_code"], "115r")
         self.assertEqual(result.data[0]["id"], "chunk-1")
+
+    def test_period_specific_inputs_reach_repository(self) -> None:
+        vacancy = self.executor.execute(
+            "get_vacant_units",
+            {"limit": 25, "report_month": "2025-06-01"},
+            self.context,
+        )
+        rent = self.executor.execute(
+            "get_rent_by_unit_type",
+            {"report_month": "2025-06-01"},
+            self.context,
+        )
+
+        self.assertEqual(vacancy.status, "succeeded")
+        self.assertEqual(rent.status, "succeeded")
+        self.assertEqual(
+            self.repository.vacancy_calls,
+            [("115r", 25, "2025-06-01")],
+        )
+        self.assertEqual(self.repository.rent_calls, [("115r", "2025-06-01")])
 
     def test_langchain_compatibility_wrapper_uses_executor(self) -> None:
         tools = {

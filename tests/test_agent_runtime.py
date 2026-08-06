@@ -204,6 +204,69 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(run_store.saved[-1]["pending_approval"]["sql"], "SELECT 1")
         self.assertEqual(run_store.checkpoints[-1][0], "approval_requested")
 
+    def test_investigation_report_is_scoped_to_run_and_persisted(self) -> None:
+        response = ChatResponse(
+            property_code="115r",
+            model="mock:test",
+            answer_markdown="Executive brief",
+            investigation={
+                "summary": "Occupancy evidence summary.",
+                "findings": [],
+                "citations": [
+                    {
+                        "citation_id": "citation-1",
+                        "property_code": "115r",
+                        "source_type": "structured_tool",
+                        "source_name": "get_occupancy_trend",
+                        "tool_invocation_id": "tool-1",
+                        "content_hash": "hash",
+                        "retrieved_at": "2026-08-05T00:00:00+00:00",
+                        "evidence": {"rows": []},
+                    }
+                ],
+                "artifacts": [
+                    {
+                        "artifact_id": "artifact-1",
+                        "type": "executive_brief",
+                        "name": "brief.md",
+                        "content_type": "text/markdown",
+                        "content": "Executive brief",
+                    }
+                ],
+                "trace_summary": {
+                    "steps": 1,
+                    "tool_calls": 1,
+                    "duration_ms": 5,
+                    "tool_order": ["get_occupancy_trend"],
+                    "stop_reason": "completed",
+                    "verification_status": "passed",
+                    "verification_checks": ["property_scope_valid:1"],
+                },
+            },
+        )
+        run_store = RecordingRunStore()
+        runtime = AgentRuntime(
+            Settings(_env_file=None),
+            workflow_factory=lambda _: FakeWorkflow(response),
+            run_store_factory=lambda _: run_store,
+        )
+
+        result = runtime.answer(
+            property_code="115r",
+            message="Investigate occupancy decline",
+            model="mock:test",
+            conversation_id="conversation-1",
+            user_id="user-1",
+        )
+
+        self.assertEqual(result.investigation.run_id, result.run_id)
+        self.assertEqual(run_store.saved[-1]["artifacts"][0]["artifact_id"], "artifact-1")
+        self.assertEqual(run_store.saved[-1]["citations"][0]["citation_id"], "citation-1")
+        self.assertEqual(
+            result.tool_results["occupancy_investigation"]["run_id"],
+            result.run_id,
+        )
+
     def test_workflow_failure_is_checkpointed(self) -> None:
         class FailingWorkflow(FakeWorkflow):
             def answer(self, **kwargs: Any) -> ChatResponse:

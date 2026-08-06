@@ -191,6 +191,15 @@ class AgentRuntime:
             )
             self._capture_workflow_execution(state, workflow)
             response.run_id = state["run_id"]
+            if response.investigation is not None:
+                response.investigation.run_id = state["run_id"]
+                state["artifacts"].extend(
+                    artifact.model_dump(mode="json")
+                    for artifact in response.investigation.artifacts
+                )
+                response.tool_results["occupancy_investigation"] = (
+                    response.investigation.model_dump(mode="json")
+                )
             state["observations"].append(
                 {
                     "step": state["current_step"],
@@ -198,7 +207,13 @@ class AgentRuntime:
                     "component_types": [component.type for component in response.components],
                 }
             )
-            state["citations"] = [source.model_dump() for source in response.sources]
+            if response.investigation is not None:
+                state["citations"] = [
+                    citation.model_dump(mode="json")
+                    for citation in response.investigation.citations
+                ]
+            else:
+                state["citations"] = [source.model_dump() for source in response.sources]
             pending_component = next(
                 (
                     component

@@ -164,7 +164,12 @@ class RentRollRepository:
             (property_code.lower(), property_code.lower(), property_code.lower(), limit),
         )
 
-    def get_vacant_units(self, property_code: str, limit: int = 20) -> list[dict]:
+    def get_vacant_units(
+        self,
+        property_code: str,
+        limit: int = 20,
+        report_month: str | None = None,
+    ) -> list[dict]:
         return self.db.fetch_all(
             """
             SELECT
@@ -179,18 +184,31 @@ class RentRollRepository:
             WHERE u.property_code = %s
               AND r.property_code = %s
               AND u.resident_status = 'VACANT'
-              AND r.report_month = (
-                SELECT MAX(report_month)
-                FROM rent_roll_reports
-                WHERE property_code = %s
+              AND r.report_month = COALESCE(
+                %s,
+                (
+                  SELECT MAX(report_month)
+                  FROM rent_roll_reports
+                  WHERE property_code = %s
+                )
               )
             ORDER BY u.unit
             LIMIT %s
             """,
-            (property_code.lower(), property_code.lower(), property_code.lower(), limit),
+            (
+                property_code.lower(),
+                property_code.lower(),
+                report_month,
+                property_code.lower(),
+                limit,
+            ),
         )
 
-    def get_rent_by_unit_type(self, property_code: str) -> list[dict]:
+    def get_rent_by_unit_type(
+        self,
+        property_code: str,
+        report_month: str | None = None,
+    ) -> list[dict]:
         return self.db.fetch_all(
             """
             SELECT
@@ -204,13 +222,21 @@ class RentRollRepository:
             JOIN rent_roll_reports r ON r.id = u.report_id
             WHERE u.property_code = %s
               AND r.property_code = %s
-              AND r.report_month = (
-                SELECT MAX(report_month)
-                FROM rent_roll_reports
-                WHERE property_code = %s
+              AND r.report_month = COALESCE(
+                %s,
+                (
+                  SELECT MAX(report_month)
+                  FROM rent_roll_reports
+                  WHERE property_code = %s
+                )
               )
             GROUP BY u.unit_type, r.report_month
             ORDER BY unit_count DESC, u.unit_type
             """,
-            (property_code.lower(), property_code.lower(), property_code.lower()),
+            (
+                property_code.lower(),
+                property_code.lower(),
+                report_month,
+                property_code.lower(),
+            ),
         )

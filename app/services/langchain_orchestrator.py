@@ -19,6 +19,11 @@ from app.agents.loop import (
     ExecutionLimits,
     LoopDecision,
 )
+from app.agents.occupancy_investigation import (
+    OccupancyInvestigationPolicy,
+    build_occupancy_investigation_report,
+    is_occupancy_investigation_request,
+)
 from app.agents.planner import (
     UNSUPPORTED_FACT_TERMS,
     LLMToolPlanner,
@@ -340,6 +345,15 @@ class LangChainOrchestrator:
                 tool_results=tool_results,
             )
         scope_note = self._property_scope_note(message, profile)
+
+        if is_occupancy_investigation_request(message):
+            return self._run_occupancy_investigation(
+                profile=profile,
+                property_code=normalized_code,
+                message=message,
+                model=model,
+                scope_note=scope_note,
+            )
 
         component_followup = self._component_followup_answer(
             profile=profile,
@@ -705,6 +719,133 @@ class LangChainOrchestrator:
             components=components,
             sources=sources,
             tool_results=tool_results,
+        )
+
+    def _run_occupancy_investigation(
+        self,
+        *,
+        profile: dict[str, Any],
+        property_code: str,
+        message: str,
+        model: str,
+        scope_note: str | None,
+    ) -> ChatResponse:
+        """Run the adaptive occupancy-decline evidence workflow."""
+        if self._execution_loop is None:
+            raise RuntimeError("agent execution loop was not initialized")
+
+        policy = OccupancyInvestigationPolicy(months=12)
+        invocations: dict[str, Any] = {}
+        tool_results: dict[str, Any] = {"property_profile": profile}
+
+        result_keys = {
+            "get_occupancy_trend": "occupancy_trend",
+            "get_vacant_units": "vacant_units",
+            "get_rent_by_unit_type": "rent_by_unit_type",
+            "search_property_content": "property_content",
+        }
+
+        def execute(action: AgentAction) -> Any:
+            result = self.tool_executor.execute(
+                action.tool_name,
+                action.arguments,
+                TrustedToolContext(
+                    property_code=property_code,
+                    user_id=self.settings.runtime_user_id,
+                ),
+            )
+            invocations[action.key] = result
+            if result.status == "failed":
+                error = result.error
+                raise RuntimeError(
+                    f"{action.tool_name} failed "
+                    f"({error.type if error else 'unknown'}): "
+                    f"{error.message if error else 'Unknown tool failure.'}"
+                )
+
+            data = result.data
+            if action.tool_name == "search_property_content":
+                annotated = self._annotate_retrieval_evidence(
+                    str(action.arguments.get("query") or message),
+                    list(data or []),
+                )
+                data = [
+                    item
+                    for item in annotated
+                    if EVIDENCE_CONFIDENCE_RANK.get(
+                        str((item.get("evidence") or {}).get("confidence") or "low"),
+                        0,
+                    )
+                    >= EVIDENCE_CONFIDENCE_RANK[MIN_RETRIEVAL_CONFIDENCE]
+                ]
+            tool_results[result_keys[action.tool_name]] = data
+            return data
+
+        self._loop_result = self._execution_loop.run(policy.decide, execute)
+        report, markdown = build_occupancy_investigation_report(
+            property_code=property_code,
+            property_name=str(profile.get("property_name") or property_code),
+            observations=self._execution_loop.observations,
+            invocations=invocations,
+            loop_result=self._loop_result,
+            total_tool_calls=self.tool_call_count,
+        )
+        tool_results["occupancy_investigation"] = report.model_dump(mode="json")
+
+        components: list[UIComponent] = []
+        trend = list(tool_results.get("occupancy_trend") or [])
+        if trend:
+            components.append(
+                UIComponent(
+                    type="line_chart",
+                    title="Occupancy Trend",
+                    data=[
+                        {
+                            "label": row["report_month"],
+                            "value": row["unit_occupancy_pct"],
+                            "unit": "%",
+                        }
+                        for row in trend
+                    ],
+                )
+            )
+        vacancies = list(tool_results.get("vacant_units") or [])
+        if vacancies:
+            components.append(
+                UIComponent(
+                    type="table",
+                    title="Vacant Units at Largest Decline",
+                    data=self._with_bedroom_categories(vacancies),
+                )
+            )
+        rent_by_type = list(tool_results.get("rent_by_unit_type") or [])
+        if rent_by_type:
+            components.append(
+                UIComponent(
+                    type="bar_chart",
+                    title="Market Rent by Unit Type at Largest Decline",
+                    data=[
+                        {
+                            "label": row["unit_type"],
+                            "value": row["avg_market_rent"],
+                            "unit": "USD",
+                            "unit_count": row["unit_count"],
+                        }
+                        for row in rent_by_type
+                    ],
+                )
+            )
+
+        retrieval = list(tool_results.get("property_content") or [])
+        sources = self._sources_from_retrieval(retrieval)
+        return ChatResponse(
+            property_code=property_code,
+            model=model,
+            answer_markdown=self._with_scope_note(markdown, scope_note),
+            components=components,
+            sources=sources,
+            tool_results=tool_results,
+            investigation=report,
         )
 
     def _execute_tool_plan(

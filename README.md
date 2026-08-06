@@ -18,6 +18,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 - LLM-assisted tool planning with backend validation and server-side `property_code` injection.
 - Typed tool registry with validated inputs/outputs, bounded execution, retry policy, and budgets.
 - Bounded plan-execute-observe-decide loop with configurable run limits.
+- Adaptive occupancy-decline investigation with verified evidence and an executive brief.
 - Safe SQL approval workflow for custom structured rent-roll questions not covered by predefined tools.
 - Golden dataset and evaluation scripts for retrieval and answer quality.
 
@@ -347,6 +348,34 @@ The durable run checkpoint stores the sanitized action plan, observations, plann
 attempt count, SQL approval count, and actual tool-call count. It does not store or
 expose private model reasoning.
 
+### Occupancy Decline Investigation
+
+Requests such as “Investigate why occupancy declined during the last 12 months and
+produce an executive brief” use a dedicated observation-driven workflow. It first loads
+the occupancy series and calculates the largest consecutive decline. Only when a decline
+exists does it fetch vacancies and rent by unit type for that exact report month, then
+retrieve property-scoped public leasing context. A no-decline result stops after the
+first tool instead of making unnecessary calls.
+
+The response includes an `investigation` object with `run_id`, `status`, `summary`,
+typed findings, citations, a Markdown artifact, and a trace summary. Every numerical
+metric must exist in its referenced structured evidence, every retrieval citation must
+reference a real scoped chunk, and cross-property citations are rejected. The brief
+describes concurrent conditions but does not claim that correlation proves causation.
+
+Run the local mock-model demo with:
+
+```bash
+curl -s http://localhost:8000/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "property_code": "115r",
+    "model": "mock:demo",
+    "conversation_id": "occupancy-demo",
+    "message": "Investigate why occupancy declined during the last 12 months and produce an executive brief with supporting evidence."
+  }'
+```
+
 ## Design Decisions
 
 MySQL was used for rent-roll data because the source files are structured and naturally relational. The schema separates property metadata, reports, summary groups, unit-level rows, and charge summaries. This makes analytical queries explicit, auditable, and property-scoped.
@@ -385,6 +414,7 @@ Examples the assistant is designed to handle:
 - latest occupancy, market rent, lease charges, and vacant count
 - executive summary
 - occupancy trend over available months
+- executive occupancy-decline investigation with period-specific vacancy evidence
 - rent vs lease charge comparison
 - charge category breakdown
 - top balances

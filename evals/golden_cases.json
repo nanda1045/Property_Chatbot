@@ -278,6 +278,44 @@
     }
   },
   {
+    "name": "canfield_occupancy_decline_investigation",
+    "property_code": "115r",
+    "message": "Investigate why occupancy declined during the last 12 months and produce an executive brief with supporting evidence.",
+    "tags": [
+      "agent_trajectory",
+      "multi_step",
+      "occupancy",
+      "verification"
+    ],
+    "generation": {
+      "required_terms": [
+        "Executive Brief",
+        "largest monthly decline",
+        "2025-07-01",
+        "does not prove"
+      ],
+      "forbidden_terms": [
+        "proves the cause",
+        "another property"
+      ],
+      "expected_component_types": [
+        "line_chart",
+        "table",
+        "bar_chart"
+      ],
+      "expected_tool_keys": [
+        "property_profile",
+        "occupancy_trend",
+        "vacant_units",
+        "rent_by_unit_type",
+        "property_content",
+        "occupancy_investigation"
+      ],
+      "expected_source_property_code": "115r",
+      "max_source_count": 1
+    }
+  },
+  {
     "name": "canfield_occupancy_change_across_available_months",
     "property_code": "115r",
     "message": "What changed in occupancy across the available months?",
