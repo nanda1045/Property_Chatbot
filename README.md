@@ -19,6 +19,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 - Typed tool registry with validated inputs/outputs, bounded execution, retry policy, and budgets.
 - Bounded plan-execute-observe-decide loop with configurable run limits.
 - Adaptive occupancy-decline investigation with verified evidence and an executive brief.
+- Durable conversation turns, rolling summaries, run state, artifacts, and evidence.
 - Safe SQL approval workflow for custom structured rent-roll questions not covered by predefined tools.
 - Golden dataset and evaluation scripts for retrieval and answer quality.
 
@@ -26,7 +27,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 
 ```text
 app/agents/                  Agent runtime, workflow, planner, state, and policies
-app/memory/                  Durable agent run and execution-step stores
+app/memory/                  Durable conversation, run, artifact, and evidence stores
 app/tools/                   Typed contracts, registry, executor, and property tools
 app/                         FastAPI backend, services, tools, retrieval clients
 frontend/                    React/Vite chatbot UI
@@ -363,6 +364,20 @@ metric must exist in its referenced structured evidence, every retrieval citatio
 reference a real scoped chunk, and cross-property citations are rejected. The brief
 describes concurrent conditions but does not claim that correlation proves causation.
 
+### Durable Conversation Memory
+
+Conversation history is persisted in MySQL instead of application-process memory. Each
+thread and turn is constrained by the trusted runtime user, client conversation id, and
+active property code; each agent-backed turn also records its run id. The assistant sends
+only the eight most recent turns plus a bounded rolling summary of older turns into the
+next prompt.
+
+Run memory retains the current plan, completed and pending steps, approval state,
+failures, and execution budgets. Generated SQL proposals, reports, structured UI and
+tool outputs, retrieved evidence, citations, and exported-file metadata are normalized
+into run-linked artifact and evidence tables. Artifact and evidence reads join back
+through the user, conversation, property, and optional run scope to prevent leakage.
+
 Run the local mock-model demo with:
 
 ```bash
@@ -493,7 +508,7 @@ Evaluation coverage includes:
 - Add a formal metric catalog that defines supported business metrics, required tables, calculation rules, SQL templates, freshness requirements, and whether each metric is safe to expose.
 - Expand validated analytics tools for common property-management questions such as renewal trends, bad debt percentage, delinquency aging, lease expirations, move-ins, move-outs, and rent growth.
 - Move custom SQL from free-form draft approval toward approved parameterized query templates generated from the metric catalog.
-- Add a richer conversation state layer, such as LangGraph, for multi-step follow-ups, clarification loops, and durable session memory.
+- Add richer semantic summarization and user-controlled conversation retention policies.
 - Add scheduled website re-scraping and index refresh jobs so retrieval content stays current.
 - Add stronger retrieval evaluation with larger golden datasets, human labels, and periodic LLM-judge scoring for faithfulness, answer relevance, and citation quality.
 - Add authentication, role-based access control, and audit logs before using the system with real users or sensitive property data.

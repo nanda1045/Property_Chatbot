@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from typing import Any, Literal, Protocol, cast
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from app.agents.state import AgentState, RunStatus
 
@@ -86,6 +87,8 @@ class AgentRunStore:
         )
         if affected != 1:
             raise LookupError("agent run was not found in the requested scope")
+        self._persist_artifacts(state)
+        self._persist_citations(state)
 
     def load(self, run_id: str, user_id: str, property_code: str) -> AgentState | None:
         row = self.database.fetch_one(
@@ -234,6 +237,91 @@ class AgentRunStore:
             row["output"] = _json_load(row.pop("output_json", None), None)
             row["error"] = _json_load(row.pop("error_json", None), None)
         return rows
+
+    def _persist_artifacts(self, state: AgentState) -> None:
+        """Normalize append-only run artifacts for scoped retrieval and audit."""
+        for artifact in state["artifacts"]:
+            artifact_id = str(artifact.get("artifact_id") or uuid4())
+            artifact["artifact_id"] = artifact_id
+            artifact_type = str(artifact.get("type") or "structured_output")
+            name = str(
+                artifact.get("name") or artifact_type.replace("_", " ").title()
+            )
+            content_json = _json_dump(artifact)
+            content_hash = sha256(content_json.encode("utf-8")).hexdigest()
+            self.database.execute(
+                """
+                INSERT INTO agent_artifacts (
+                  artifact_id, run_id, artifact_type, name, content_json,
+                  storage_uri, content_hash
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                  artifact_type = VALUES(artifact_type), name = VALUES(name),
+                  content_json = VALUES(content_json),
+                  storage_uri = VALUES(storage_uri),
+                  content_hash = VALUES(content_hash)
+                """,
+                (
+                    artifact_id,
+                    state["run_id"],
+                    artifact_type,
+                    name,
+                    content_json,
+                    artifact.get("storage_uri"),
+                    content_hash,
+                ),
+            )
+
+    def _persist_citations(self, state: AgentState) -> None:
+        """Normalize evidence while enforcing the run's property scope."""
+        for citation in state["citations"]:
+            canonical = _json_dump(citation)
+            citation_id = str(
+                citation.get("citation_id")
+                or uuid5(NAMESPACE_URL, f"{state['run_id']}:{canonical}")
+            )
+            source_type = str(citation.get("source_type") or "retrieval")
+            source_name = str(
+                citation.get("source_name")
+                or citation.get("title")
+                or citation.get("tool")
+                or "property evidence"
+            )
+            content_hash = str(
+                citation.get("content_hash")
+                or sha256(canonical.encode("utf-8")).hexdigest()
+            )
+            self.database.execute(
+                """
+                INSERT INTO citation_evidence (
+                  citation_id, run_id, property_code, source_type, source_name,
+                  tool_invocation_id, document_id, chunk_id, content_hash,
+                  source_url, evidence_json, index_version
+                ) VALUES (%s, %s, %s, %s, %s, NULL, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                  source_type = VALUES(source_type),
+                  source_name = VALUES(source_name),
+                  document_id = VALUES(document_id),
+                  chunk_id = VALUES(chunk_id),
+                  content_hash = VALUES(content_hash),
+                  source_url = VALUES(source_url),
+                  evidence_json = VALUES(evidence_json),
+                  index_version = VALUES(index_version)
+                """,
+                (
+                    citation_id,
+                    state["run_id"],
+                    state["property_code"],
+                    source_type,
+                    source_name,
+                    citation.get("document_id"),
+                    citation.get("chunk_id"),
+                    content_hash,
+                    citation.get("source_url"),
+                    canonical,
+                    citation.get("index_version"),
+                ),
+            )
 
     @staticmethod
     def _state_params(state: AgentState) -> tuple[Any, ...]:

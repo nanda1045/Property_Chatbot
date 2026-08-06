@@ -11,7 +11,9 @@ class ChatRequest(BaseModel):
     model: str = "anthropic:claude-haiku-4-5-20251001"
     conversation_id: str | None = Field(
         default=None,
-        description="Client-generated conversation/session id for lightweight memory.",
+        min_length=1,
+        max_length=128,
+        description="Client-generated id for durable property-scoped conversation memory.",
     )
 
 
@@ -24,14 +26,14 @@ class SqlApprovalRequest(BaseModel):
     model: str = "anthropic:claude-haiku-4-5-20251001"
     sql: str = Field(description="Backend-validated read-only SQL proposed for approval.")
     question: str = Field(description="Original user question that produced the SQL proposal.")
-    conversation_id: str | None = None
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class AgentApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     property_code: str = Field(description="Backend-selected active property code.")
-    conversation_id: str
+    conversation_id: str = Field(min_length=1, max_length=128)
     approved: bool = True
 
 

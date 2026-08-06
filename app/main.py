@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from app.agents.runtime import AgentRunConflictError, AgentRunNotFoundError, AgentRuntime
 from app.core.config import Settings, get_settings
 from app.db.mysql import MySQLDatabase
+from app.memory.conversation_store import ConversationMemoryStore
 from app.schemas import (
     AgentApprovalRequest,
     ChatRequest,
@@ -44,8 +45,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-conversation_memory = ConversationMemory()
 
 
 @app.get("/health")
@@ -90,7 +89,12 @@ def properties(settings: SettingsDep) -> dict[str, list[dict]]:
 @app.post("/chat")
 def chat(request: ChatRequest, settings: SettingsDep) -> ChatResponse:
     conversation_id = request.conversation_id or str(uuid4())
-    history = conversation_memory.get(conversation_id, request.property_code)
+    memory = _conversation_memory(settings)
+    history = memory.get(
+        user_id=settings.runtime_user_id,
+        conversation_id=conversation_id,
+        property_code=request.property_code,
+    )
     runtime = AgentRuntime(settings)
     response = runtime.answer(
         property_code=request.property_code,
@@ -101,9 +105,11 @@ def chat(request: ChatRequest, settings: SettingsDep) -> ChatResponse:
         user_id=settings.runtime_user_id,
     )
     response.conversation_id = conversation_id
-    conversation_memory.add(
+    memory.add(
+        user_id=settings.runtime_user_id,
         conversation_id=conversation_id,
         property_code=response.property_code,
+        run_id=response.run_id,
         user_message=request.message,
         assistant_answer=response.answer_markdown,
         tool_result_keys=sorted(response.tool_results),
@@ -127,7 +133,7 @@ def execute_sql(request: SqlApprovalRequest, settings: SettingsDep) -> ChatRespo
             approved=True,
             settings=settings,
         )
-        _record_approval_response(response, request.question)
+        _record_approval_response(response, request.question, settings)
         return response
 
     normalized_code = request.property_code.lower()
@@ -154,7 +160,8 @@ def execute_sql(request: SqlApprovalRequest, settings: SettingsDep) -> ChatRespo
             "row_count": len(rows),
         },
     )
-    conversation_memory.add(
+    _conversation_memory(settings).add(
+        user_id=settings.runtime_user_id,
         conversation_id=request.conversation_id,
         property_code=normalized_code,
         user_message=f"Approved SQL for: {request.question}",
@@ -179,7 +186,7 @@ def approve_agent_run(
         settings=settings,
     )
     question = str(response.tool_results.get("question") or "custom SQL request")
-    _record_approval_response(response, question)
+    _record_approval_response(response, question, settings)
     return response
 
 
@@ -205,10 +212,16 @@ def _resolve_agent_approval(
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
-def _record_approval_response(response: ChatResponse, question: str) -> None:
-    conversation_memory.add(
+def _record_approval_response(
+    response: ChatResponse,
+    question: str,
+    settings: Settings,
+) -> None:
+    _conversation_memory(settings).add(
+        user_id=settings.runtime_user_id,
         conversation_id=response.conversation_id,
         property_code=response.property_code,
+        run_id=response.run_id,
         user_message=f"SQL approval decision for: {question}",
         assistant_answer=response.answer_markdown,
         tool_result_keys=sorted(response.tool_results),
@@ -230,7 +243,12 @@ def chat_stream(request: ChatRequest, settings: SettingsDep) -> StreamingRespons
         def run_chat() -> None:
             try:
                 conversation_id = request.conversation_id or str(uuid4())
-                history = conversation_memory.get(conversation_id, request.property_code)
+                memory = _conversation_memory(settings)
+                history = memory.get(
+                    user_id=settings.runtime_user_id,
+                    conversation_id=conversation_id,
+                    property_code=request.property_code,
+                )
                 runtime = AgentRuntime(settings)
                 response = runtime.answer(
                     property_code=request.property_code,
@@ -242,9 +260,11 @@ def chat_stream(request: ChatRequest, settings: SettingsDep) -> StreamingRespons
                     user_id=settings.runtime_user_id,
                 )
                 response.conversation_id = conversation_id
-                conversation_memory.add(
+                memory.add(
+                    user_id=settings.runtime_user_id,
                     conversation_id=conversation_id,
                     property_code=response.property_code,
+                    run_id=response.run_id,
                     user_message=request.message,
                     assistant_answer=response.answer_markdown,
                     tool_result_keys=sorted(response.tool_results),
@@ -268,6 +288,10 @@ def chat_stream(request: ChatRequest, settings: SettingsDep) -> StreamingRespons
             yield encode_event(event, payload)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+def _conversation_memory(settings: Settings) -> ConversationMemory:
+    return ConversationMemory(ConversationMemoryStore(MySQLDatabase(settings)))
 
 
 def run() -> None:

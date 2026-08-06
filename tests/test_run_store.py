@@ -252,6 +252,61 @@ class AgentRunStoreTests(unittest.TestCase):
             self.store.claim_approval(self.state["run_id"], "user-1", "115r")
         )
 
+    def test_artifacts_and_evidence_are_normalized_with_run_scope(self) -> None:
+        class RecordingDatabase:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+            def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
+                self.calls.append((" ".join(query.split()), params))
+                return 1
+
+            def fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> None:
+                return None
+
+            def fetch_all(
+                self, query: str, params: tuple[Any, ...] = ()
+            ) -> list[dict[str, Any]]:
+                return []
+
+        database = RecordingDatabase()
+        state = new_agent_state(
+            conversation_id="conversation-1",
+            user_id="user-1",
+            property_code="115r",
+            user_goal="Create a report",
+        )
+        state["artifacts"] = [
+            {
+                "artifact_id": "artifact-1",
+                "type": "report",
+                "name": "Occupancy report",
+                "content": "report body",
+            }
+        ]
+        state["citations"] = [
+            {
+                "citation_id": "citation-1",
+                "property_code": "untrusted-property",
+                "source_type": "retrieval",
+                "source_name": "Property website",
+                "source_url": "https://example.com/property",
+                "evidence": {"text": "evidence"},
+            }
+        ]
+
+        AgentRunStore(database).save(state)
+
+        artifact_call = next(
+            call for call in database.calls if "INSERT INTO agent_artifacts" in call[0]
+        )
+        citation_call = next(
+            call for call in database.calls if "INSERT INTO citation_evidence" in call[0]
+        )
+        self.assertEqual(artifact_call[1][1], state["run_id"])
+        self.assertEqual(citation_call[1][1], state["run_id"])
+        self.assertEqual(citation_call[1][2], "115r")
+
 
 if __name__ == "__main__":
     unittest.main()

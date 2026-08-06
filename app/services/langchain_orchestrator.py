@@ -1283,7 +1283,20 @@ class LangChainOrchestrator:
             return ""
 
         lines: list[str] = []
-        for index, turn in enumerate(history[-4:], start=1):
+        summary = next(
+            (
+                str(item.get("summary") or "").strip()
+                for item in history
+                if item.get("memory_type") == "summary"
+            ),
+            "",
+        )
+        if summary:
+            lines.append(f"Earlier conversation summary:\n{summary}")
+        recent_turns = [
+            item for item in history if item.get("memory_type") != "summary"
+        ][-4:]
+        for index, turn in enumerate(recent_turns, start=1):
             user = str(turn.get("user") or "").strip()
             assistant = str(turn.get("assistant") or "").strip()
             tool_keys = turn.get("tool_result_keys") or []

@@ -202,6 +202,10 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(result.run_status, "waiting_for_approval")
         self.assertEqual(result.components[0].data["run_id"], result.run_id)
         self.assertEqual(run_store.saved[-1]["pending_approval"]["sql"], "SELECT 1")
+        self.assertEqual(
+            {artifact["type"] for artifact in run_store.saved[-1]["artifacts"]},
+            {"generated_sql", "structured_output"},
+        )
         self.assertEqual(run_store.checkpoints[-1][0], "approval_requested")
 
     def test_investigation_report_is_scoped_to_run_and_persisted(self) -> None:

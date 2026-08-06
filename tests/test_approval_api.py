@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -32,7 +32,11 @@ class ApprovalApiTests(unittest.TestCase):
                     answer_markdown="Completed.",
                 )
 
-        with patch("app.main.AgentRuntime", FakeRuntime):
+        memory = MagicMock()
+        with (
+            patch("app.main.AgentRuntime", FakeRuntime),
+            patch("app.main._conversation_memory", return_value=memory),
+        ):
             response = self.client.post(
                 "/api/agent-runs/run-1/approve",
                 json={
@@ -46,6 +50,7 @@ class ApprovalApiTests(unittest.TestCase):
         self.assertEqual(response.json()["run_status"], "completed")
         self.assertEqual(calls[0]["run_id"], "run-1")
         self.assertNotIn("sql", calls[0])
+        self.assertEqual(memory.add.call_args.kwargs["run_id"], "run-1")
 
     def test_approval_endpoint_rejects_client_supplied_sql(self) -> None:
         response = self.client.post(

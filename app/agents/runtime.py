@@ -200,6 +200,29 @@ class AgentRuntime:
                 response.tool_results["occupancy_investigation"] = (
                     response.investigation.model_dump(mode="json")
                 )
+            structured_content = {
+                "tool_results": {
+                    key: value
+                    for key, value in response.tool_results.items()
+                    if key != "occupancy_investigation"
+                },
+                "components": [
+                    component.model_dump(mode="json")
+                    for component in response.components
+                ],
+                "sources": [
+                    source.model_dump(mode="json") for source in response.sources
+                ],
+            }
+            if any(structured_content.values()):
+                state["artifacts"].append(
+                    {
+                        "artifact_id": str(uuid4()),
+                        "type": "structured_output",
+                        "name": "Property chat structured output",
+                        "content": structured_content,
+                    }
+                )
             state["observations"].append(
                 {
                     "step": state["current_step"],
@@ -225,6 +248,14 @@ class AgentRuntime:
             if pending_component is not None:
                 pending_component.data["run_id"] = state["run_id"]
                 state["pending_approval"] = dict(pending_component.data)
+                state["artifacts"].append(
+                    {
+                        "artifact_id": str(uuid4()),
+                        "type": "generated_sql",
+                        "name": "Generated SQL approval proposal",
+                        "content": dict(pending_component.data),
+                    }
+                )
                 state["plan"][0]["status"] = "waiting_for_approval"
                 transition_agent_state(state, "waiting_for_approval")
             else:
