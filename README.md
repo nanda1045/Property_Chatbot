@@ -21,6 +21,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 - Adaptive occupancy-decline investigation with verified evidence and an executive brief.
 - Durable conversation turns, rolling summaries, run state, artifacts, and evidence.
 - Durable operational run events with scoped trace APIs, cancellation, and a Run Trace panel.
+- Deterministic trajectory scoring and failure-injection reliability evaluations.
 - Safe SQL approval workflow for custom structured rent-roll questions not covered by predefined tools.
 - Golden dataset and evaluation scripts for retrieval and answer quality.
 
@@ -243,6 +244,21 @@ curl -N -X POST http://127.0.0.1:8000/chat/stream \
   }'
 ```
 
+The first SSE event includes the backend-created `run_id`, conversation scope, and a
+reconnect URL. Token events may then arrive progressively, followed by one complete
+`final` event. To replay durable events after a connection interruption, reconnect with
+the last received sequence number:
+
+```bash
+curl -N \
+  -H "Last-Event-ID: 42" \
+  "http://127.0.0.1:8000/api/agent-runs/RUN_ID/stream?property_code=115r&conversation_id=CONVERSATION_ID"
+```
+
+The replay stream returns only later persisted events and ends with `run_status` once
+the run is completed, failed, or cancelled. The regular scoped run endpoint remains
+available for retrieving the final status and answer after any disconnect.
+
 Resume a checkpointed SQL approval using the `run_id` returned by chat:
 
 ```bash
@@ -452,7 +468,17 @@ For custom structured metrics, the planner can route to a controlled SQL approva
 
 The LLM is used for natural-language synthesis, not as the source of truth. Numeric facts come from MySQL tools, website facts come from retrieved chunks, and UI components are generated from structured tool outputs.
 
-Streaming is implemented with server-sent events on `/chat/stream`. Real LLM token output appears progressively, and the final event includes complete Markdown, sources, and UI components.
+Streaming is implemented with server-sent events on `/chat/stream`. Each response uses
+a bounded token queue and a shared bounded worker pool, so slow clients cannot grow a
+per-request queue or create a new background thread. The server detects closed clients,
+propagates cooperative cancellation through the runtime and tool boundaries, and
+persists the cancelled run state. Real LLM token output appears progressively, and the
+final event includes complete Markdown, sources, and UI components.
+
+Ordered run events are durable. `GET /api/agent-runs/{run_id}/stream` accepts either
+`after_sequence` or the SSE `Last-Event-ID` header to replay missed events, optionally
+follow the live run, and return its terminal status. The standard scoped run endpoint
+also returns the final answer after the original streaming connection is gone.
 
 ## Property Scoping
 
@@ -497,11 +523,30 @@ Run the golden retrieval and generation dataset:
 uv run python scripts/run_golden_evals.py --output-json evals/golden_report.json
 ```
 
+Run the deterministic agent trajectory dataset. This uses the real bounded loop,
+occupancy policy, report builder, and citation verifier with injected local evidence;
+it does not call an LLM or database:
+
+```bash
+uv run python scripts/run_trajectory_evals.py \
+  --output-json /tmp/aker-trajectory-report.json
+```
+
+Run all reliability and failure-injection tests:
+
+```bash
+uv run python -m unittest discover -s tests
+```
+
 Optional LLM-judged metrics:
 
 ```bash
 uv run python scripts/run_llm_judge_evals.py --output-json evals/llm_judge_report.json
 ```
+
+The LLM-judged suite is optional and requires the configured external API key. A live
+answer model can be sampled explicitly with `--answer-model "$LIVE_ANSWER_MODEL"`; it
+is never part of the normal automated test suite.
 
 Evaluation coverage includes:
 
@@ -516,6 +561,12 @@ Evaluation coverage includes:
 - completeness
 - citation quality
 - planner routing and response behavior for supported, unsupported, hybrid, and SQL approval queries
+- correct tool selection and exact tool order
+- unnecessary-call detection and execution-limit enforcement
+- property scope, SQL approval, and citation-grounding checks
+- tool timeout, malformed output, temporary database failure, and retry exhaustion
+- empty retrieval, invalid model arguments, and duplicate completion handling
+- restart-safe SQL approval, cross-property rejection, and missing citation evidence
 
 ## Assumptions
 

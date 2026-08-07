@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     agent_max_sql_approvals: int = Field(default=1, ge=0)
     agent_max_run_seconds: float = Field(default=60.0, gt=0)
 
+    stream_queue_max_size: int = Field(default=128, ge=4, le=4096)
+    stream_poll_interval_seconds: float = Field(default=0.25, gt=0, le=5)
+    stream_heartbeat_seconds: float = Field(default=10.0, gt=0, le=60)
+    stream_thread_join_seconds: float = Field(default=5.0, gt=0, le=30)
+
     openai_api_key: str | None = Field(default=None, repr=False)
     anthropic_api_key: str | None = Field(default=None, repr=False)
 

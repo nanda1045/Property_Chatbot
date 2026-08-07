@@ -110,6 +110,17 @@ export async function getAgentRunTrace(params: {
   return { run, steps, events, citations };
 }
 
+export async function getAgentRunStatus(params: {
+  runId: string;
+  propertyCode: string;
+  conversationId: string;
+}): Promise<AgentRunDetail> {
+  const query = runScopeQuery(params.propertyCode, params.conversationId);
+  return request<AgentRunDetail>(
+    `/api/agent-runs/${encodeURIComponent(params.runId)}?${query}`
+  );
+}
+
 export async function cancelAgentRun(params: {
   runId: string;
   propertyCode: string;
@@ -126,6 +137,14 @@ export async function cancelAgentRun(params: {
 
 type StreamHandlers = {
   onToken: (token: string) => void;
+  onRunStarted?: (run: StreamStart) => void;
+};
+
+export type StreamStart = {
+  run_id: string;
+  conversation_id: string;
+  property_code: string;
+  reconnect_url: string;
 };
 
 function parseSseEvent(rawEvent: string): { event: string; data: string } | null {
@@ -149,6 +168,7 @@ export async function sendChatStream(
     model: string;
     message: string;
     conversationId?: string;
+    signal?: AbortSignal;
   },
   handlers: StreamHandlers
 ): Promise<ChatResponse> {
@@ -157,6 +177,7 @@ export async function sendChatStream(
     headers: {
       "Content-Type": "application/json"
     },
+    signal: params.signal,
     body: JSON.stringify({
       property_code: params.propertyCode,
       model: params.model,
@@ -174,6 +195,7 @@ export async function sendChatStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let finalResponse: ChatResponse | null = null;
+  let startedRun: StreamStart | null = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -190,6 +212,9 @@ export async function sendChatStream(
       const payload = JSON.parse(parsed.data) as Record<string, unknown>;
       if (parsed.event === "token") {
         handlers.onToken(String(payload.delta ?? ""));
+      } else if (parsed.event === "status" && payload.run_id) {
+        startedRun = payload as StreamStart;
+        handlers.onRunStarted?.(startedRun);
       } else if (parsed.event === "final") {
         finalResponse = payload as ChatResponse;
       } else if (parsed.event === "error") {
@@ -203,7 +228,17 @@ export async function sendChatStream(
   }
 
   if (!finalResponse) {
-    throw new Error("Streaming response ended before the final answer was received.");
+    if (startedRun) {
+      const status = await getAgentRunStatus({
+        runId: startedRun.run_id,
+        propertyCode: startedRun.property_code,
+        conversationId: startedRun.conversation_id
+      });
+      throw new Error(
+        `Streaming connection ended; run ${startedRun.run_id} is ${status.status}.`
+      );
+    }
+    throw new Error("Streaming response ended before a run was created.");
   }
 
   return finalResponse;

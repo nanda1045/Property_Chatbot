@@ -4,6 +4,12 @@ import unittest
 from copy import deepcopy
 from typing import Any
 
+from app.agents.cancellation import AgentRunCancelledError
+from app.agents.evaluation import (
+    TrajectoryExpectation,
+    TrajectorySnapshot,
+    evaluate_trajectory,
+)
 from app.agents.policies import property_scope_conflict
 from app.agents.runtime import AgentRunConflictError, AgentRuntime
 from app.agents.state import AgentState
@@ -231,7 +237,8 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(len(workflow.calls), 1)
         self.assertEqual(workflow.calls[0]["property_code"], "115R")
         self.assertIs(workflow.calls[0]["history"], history)
-        self.assertIs(workflow.calls[0]["on_token"], on_token)
+        workflow.calls[0]["on_token"]("chunk")
+        self.assertEqual(tokens, ["chunk"])
         self.assertEqual(response.run_status, "completed")
         self.assertEqual(response.run_id, run_store.created["run_id"])
         self.assertEqual(run_store.saved[-1]["final_answer"], "delegated")
@@ -314,6 +321,24 @@ class AgentRuntimeTests(unittest.TestCase):
             "approval_requested",
             [event["event_type"] for event in run_store.events],
         )
+        trajectory = evaluate_trajectory(
+            TrajectorySnapshot(
+                property_code="115r",
+                status=str(result.run_status),
+                step_count=run_store.saved[-1]["current_step"],
+                max_steps=run_store.saved[-1]["max_steps"],
+                max_tool_calls=run_store.saved[-1]["max_tool_calls"],
+                approval_requested=any(
+                    event["event_type"] == "approval_requested"
+                    for event in run_store.events
+                ),
+            ),
+            TrajectoryExpectation(
+                approval_required=True,
+                grounded_answer_required=False,
+            ),
+        )
+        self.assertTrue(trajectory.passed)
 
     def test_investigation_report_is_scoped_to_run_and_persisted(self) -> None:
         response = ChatResponse(
@@ -371,8 +396,12 @@ class AgentRuntimeTests(unittest.TestCase):
         )
 
         self.assertEqual(result.investigation.run_id, result.run_id)
-        self.assertEqual(run_store.saved[-1]["artifacts"][0]["artifact_id"], "artifact-1")
-        self.assertEqual(run_store.saved[-1]["citations"][0]["citation_id"], "citation-1")
+        self.assertEqual(
+            run_store.saved[-1]["artifacts"][0]["artifact_id"], "artifact-1"
+        )
+        self.assertEqual(
+            run_store.saved[-1]["citations"][0]["citation_id"], "citation-1"
+        )
         self.assertEqual(
             result.tool_results["occupancy_investigation"]["run_id"],
             result.run_id,
@@ -451,6 +480,51 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(
             [name for name, _ in run_store.checkpoints][-2:],
             ["step_failed", "run_failed"],
+        )
+
+    def test_cooperative_stream_cancellation_is_persisted_once(self) -> None:
+        cancellation = {"requested": False}
+
+        class StreamingWorkflow(FakeWorkflow):
+            def answer(self, **kwargs: Any) -> ChatResponse:
+                kwargs["on_token"]("first")
+                kwargs["on_token"]("second")
+                raise AssertionError("the second token must observe cancellation")
+
+        def receive_token(_token: str) -> None:
+            cancellation["requested"] = True
+
+        run_store = RecordingRunStore()
+        runtime = AgentRuntime(
+            Settings(_env_file=None),
+            workflow_factory=lambda _: StreamingWorkflow(),
+            run_store_factory=lambda _: run_store,
+        )
+
+        with self.assertRaises(AgentRunCancelledError):
+            runtime.answer(
+                property_code="115r",
+                message="Stream a response",
+                model="mock:test",
+                on_token=receive_token,
+                conversation_id="conversation-1",
+                user_id="user-1",
+                run_id="stream-run-1",
+                cancellation_requested=lambda: cancellation["requested"],
+            )
+
+        self.assertEqual(run_store.created["run_id"], "stream-run-1")
+        self.assertEqual(run_store.saved[-1]["status"], "cancelled")
+        self.assertEqual(run_store.finished[-1]["status"], "cancelled")
+        cancellation_events = [
+            event
+            for event in run_store.events
+            if event["event_type"] == "run_cancelled"
+        ]
+        self.assertEqual(len(cancellation_events), 1)
+        self.assertEqual(
+            cancellation_events[0]["payload"]["reason"],
+            "client_disconnected",
         )
 
     def test_approval_resumes_from_checkpoint_after_runtime_restart(self) -> None:
@@ -568,7 +642,9 @@ class AgentRuntimeTests(unittest.TestCase):
         )
 
         tool_events = [
-            event for event in run_store.events if event["event_type"].startswith("tool_")
+            event
+            for event in run_store.events
+            if event["event_type"].startswith("tool_")
         ]
         self.assertEqual(
             [event["event_type"] for event in tool_events],

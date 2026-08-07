@@ -77,6 +77,7 @@ class AgentRunStep(BaseModel):
 
 
 class AgentRunEvent(BaseModel):
+    sequence_id: int | None = None
     event_id: str
     run_id: str
     event_type: str

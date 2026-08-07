@@ -1,0 +1,99 @@
+[
+  {
+    "name": "occupancy_decline_collects_only_required_evidence",
+    "property_code": "115r",
+    "property_name": "Canfield Park",
+    "outputs": {
+      "get_occupancy_trend": [
+        {
+          "report_month": "2025-01-01",
+          "unit_occupancy_pct": 95.0,
+          "market_rent": 100000.0,
+          "lease_charges": 90000.0
+        },
+        {
+          "report_month": "2025-02-01",
+          "unit_occupancy_pct": 89.5,
+          "market_rent": 101500.0,
+          "lease_charges": 88750.0
+        }
+      ],
+      "get_vacant_units": [
+        {
+          "unit": "101",
+          "unit_type": "A1",
+          "market_rent": 1500.0,
+          "report_month": "2025-02-01"
+        }
+      ],
+      "get_rent_by_unit_type": [
+        {
+          "unit_type": "A1",
+          "unit_count": 10,
+          "avg_market_rent": 1550.0,
+          "report_month": "2025-02-01"
+        }
+      ],
+      "search_property_content": [
+        {
+          "id": "chunk-115r-amenities",
+          "content": "Covered parking and resident amenities are advertised.",
+          "metadata": {
+            "property_code": "115r",
+            "document_id": "document-115r-amenities",
+            "source_url": "https://example.test/115r/amenities",
+            "page_type": "amenities",
+            "scraped_at": "2026-08-01T00:00:00+00:00",
+            "index_version": "2026-08-01T00:00:00+00:00"
+          }
+        }
+      ]
+    },
+    "expectation": {
+      "required_tools": [
+        "get_occupancy_trend",
+        "get_vacant_units",
+        "get_rent_by_unit_type",
+        "search_property_content"
+      ],
+      "expected_tool_order": [
+        "get_occupancy_trend",
+        "get_vacant_units",
+        "get_rent_by_unit_type",
+        "search_property_content"
+      ],
+      "forbidden_tools": ["execute_generated_sql"],
+      "approval_required": false,
+      "grounded_answer_required": true
+    }
+  },
+  {
+    "name": "no_decline_stops_after_trend",
+    "property_code": "115r",
+    "property_name": "Canfield Park",
+    "outputs": {
+      "get_occupancy_trend": [
+        {
+          "report_month": "2025-01-01",
+          "unit_occupancy_pct": 94.0
+        },
+        {
+          "report_month": "2025-02-01",
+          "unit_occupancy_pct": 95.0
+        }
+      ]
+    },
+    "expectation": {
+      "required_tools": ["get_occupancy_trend"],
+      "expected_tool_order": ["get_occupancy_trend"],
+      "forbidden_tools": [
+        "get_vacant_units",
+        "get_rent_by_unit_type",
+        "search_property_content",
+        "execute_generated_sql"
+      ],
+      "approval_required": false,
+      "grounded_answer_required": true
+    }
+  }
+]

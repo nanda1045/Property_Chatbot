@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
+from app.agents.cancellation import CancellationCheck, raise_if_cancelled
 from app.agents.loop import (
     AgentAction,
     AgentLoopResult,
@@ -101,7 +102,10 @@ SUPPORTED_STRUCTURED_CAPABILITIES: dict[str, dict[str, Any]] = {
     },
     "rent_lease_comparison": {
         "tool": "get_latest_property_kpis",
-        "supports": ("market rent vs lease charges", "rent and lease charge comparison"),
+        "supports": (
+            "market rent vs lease charges",
+            "rent and lease charge comparison",
+        ),
         "complete_dataset": True,
     },
 }
@@ -109,7 +113,15 @@ UNSUPPORTED_STRUCTURED_AGGREGATE_RULES = (
     {
         "label": "balance aggregates by category",
         "metric_terms": ("balance", "balances", "delinquency", "delinquent"),
-        "aggregate_terms": ("average", "avg", "mean", "median", "rate", "ratio", " by "),
+        "aggregate_terms": (
+            "average",
+            "avg",
+            "mean",
+            "median",
+            "rate",
+            "ratio",
+            " by ",
+        ),
         "grouping_terms": (
             "bedroom",
             "category",
@@ -139,7 +151,14 @@ UNSUPPORTED_STRUCTURED_AGGREGATE_RULES = (
     },
     {
         "label": "charge aggregates by category",
-        "metric_terms": ("lease charge", "lease charges", "charge", "charges", "fee", "fees"),
+        "metric_terms": (
+            "lease charge",
+            "lease charges",
+            "charge",
+            "charges",
+            "fee",
+            "fees",
+        ),
         "aggregate_terms": ("median", "rate", "ratio", " by ", "per ", "group"),
         "grouping_terms": (
             "bedroom",
@@ -261,6 +280,7 @@ class LangChainOrchestrator:
         self._operational_events: list[dict[str, Any]] = []
         self._property_code: str | None = None
         self._tool_invocations: list[ToolResult] = []
+        self._cancellation_check: CancellationCheck | None = None
         self.tool_executor = ToolExecutor(
             build_property_tool_registry(settings),
             max_tool_calls=settings.agent_max_tool_calls,
@@ -280,11 +300,13 @@ class LangChainOrchestrator:
         run_id: str,
         conversation_id: str,
         event_sink: Callable[[dict[str, Any]], None],
+        cancellation_check: CancellationCheck | None = None,
     ) -> None:
         """Attach backend-owned run scope and the durable operational event sink."""
         self._run_id = run_id
         self._conversation_id = conversation_id
         self._operational_event_sink = event_sink
+        self._cancellation_check = cancellation_check
 
     def _capture_tool_event(self, event: dict[str, Any]) -> None:
         captured = dict(event)
@@ -304,7 +326,9 @@ class LangChainOrchestrator:
     def execution_plan(self) -> list[dict[str, Any]]:
         if not self._execution_loop:
             return []
-        return [action.model_dump(mode="json") for action in self._execution_loop.actions]
+        return [
+            action.model_dump(mode="json") for action in self._execution_loop.actions
+        ]
 
     @property
     def execution_observations(self) -> list[dict[str, Any]]:
@@ -331,6 +355,7 @@ class LangChainOrchestrator:
         on_token: Callable[[str], None] | None = None,
         history: list[dict[str, Any]] | None = None,
     ) -> ChatResponse:
+        raise_if_cancelled(self._cancellation_check)
         self._operational_events = []
         self._tool_invocations = []
         self.tool_executor.reset_execution()
@@ -459,6 +484,7 @@ class LangChainOrchestrator:
         history_context = self._history_context(history)
 
         if provider != "mock" and model_name:
+
             def chat_invoke(messages: list[dict[str, str]]) -> str:
                 user_content = messages[1]["content"]
                 if history_context:
@@ -675,8 +701,9 @@ class LangChainOrchestrator:
             )
 
         if wants_retrieval:
-
-            retrieval_results = self._annotate_retrieval_evidence(message, retrieval_results)
+            retrieval_results = self._annotate_retrieval_evidence(
+                message, retrieval_results
+            )
 
             is_review_query = self._wants_reviews(message.lower())
 
@@ -687,7 +714,9 @@ class LangChainOrchestrator:
                         property_code=normalized_code,
                         model=model,
                         answer_markdown=self._with_scope_note(
-                            self._unsupported_fact_answer(profile, normalized_code, message),
+                            self._unsupported_fact_answer(
+                                profile, normalized_code, message
+                            ),
                             scope_note,
                         ),
                         components=[],
@@ -776,6 +805,7 @@ class LangChainOrchestrator:
         }
 
         def execute(action: AgentAction) -> Any:
+            raise_if_cancelled(self._cancellation_check)
             result = self.tool_executor.execute(
                 action.tool_name,
                 action.arguments,
@@ -785,6 +815,7 @@ class LangChainOrchestrator:
                     run_id=self._run_id,
                 ),
             )
+            raise_if_cancelled(self._cancellation_check)
             invocations[action.key] = result
             self._tool_invocations.append(result)
             if result.status == "failed":
@@ -917,7 +948,10 @@ class LangChainOrchestrator:
 
         if plan.route in {"structured", "hybrid"}:
             for index, tool_call in enumerate(plan.structured_tools, start=1):
-                if tool_call.name == "get_property_profile" and "property_profile" in tool_results:
+                if (
+                    tool_call.name == "get_property_profile"
+                    and "property_profile" in tool_results
+                ):
                     continue
                 action = AgentAction(
                     key=f"structured:{index}:{tool_call.name}",
@@ -950,7 +984,10 @@ class LangChainOrchestrator:
 
         def decide(observations: tuple[AgentObservation, ...]) -> LoopDecision:
             nonlocal unavailable_years
-            if observations and observations[-1].action_key == "report_periods:preflight":
+            if (
+                observations
+                and observations[-1].action_key == "report_periods:preflight"
+            ):
                 report_periods = observations[-1].data or {}
                 unavailable_years = [
                     year
@@ -1270,7 +1307,9 @@ class LangChainOrchestrator:
             "- Do not dump raw website chunks, navigation labels, fee-guide boilerplate, "
             "or disclaimer text; summarize the user-facing facts."
         )
-        prompt_tool_results = self._tool_results_for_prompt(message, tool_results, components)
+        prompt_tool_results = self._tool_results_for_prompt(
+            message, tool_results, components
+        )
         prompt_components = self._components_for_prompt(components)
         history_context = self._history_context(history)
         history_block = (
@@ -1296,7 +1335,9 @@ class LangChainOrchestrator:
             ]
         )
         chat_model = self._chat_model(provider, model_name)
-        should_stream = on_token and not any(component.type == "table" for component in components)
+        should_stream = on_token and not any(
+            component.type == "table" for component in components
+        )
         if should_stream:
             chunks: list[str] = []
             for chunk in (prompt | chat_model).stream({}):
@@ -1489,9 +1530,7 @@ class LangChainOrchestrator:
     ) -> dict[str, Any]:
         prompt_results = dict(tool_results)
         table_titles = {
-            component.title
-            for component in components
-            if component.type == "table"
+            component.title for component in components if component.type == "table"
         }
         if "Top Balances" in table_titles and tool_results.get("top_balances"):
             rows = tool_results["top_balances"]
@@ -1519,7 +1558,9 @@ class LangChainOrchestrator:
         if retrieval_results:
             text = message.lower()
             if self._wants_floorplan_answer(text):
-                prompt_results["website_answer_hint"] = self._floorplan_answer(retrieval_results)
+                prompt_results["website_answer_hint"] = self._floorplan_answer(
+                    retrieval_results
+                )
             elif self._wants_amenity_list(text):
                 prompt_results["website_answer_hint"] = self._amenity_list_answer(
                     retrieval_results,
@@ -1587,7 +1628,9 @@ class LangChainOrchestrator:
         return any(term in lowered for term in UNSUPPORTED_FACT_TERMS)
 
     @staticmethod
-    def _unsupported_fact_answer(profile: dict, property_code: str, message: str) -> str:
+    def _unsupported_fact_answer(
+        profile: dict, property_code: str, message: str
+    ) -> str:
         return (
             f"### {profile['property_name']} (`{property_code}`)\n\n"
             "I don't have that data for this property. The available sources are "
@@ -1621,19 +1664,25 @@ class LangChainOrchestrator:
         vacant = tool_results.get("latest_kpis", {}).get("vacant")
         if current and self._wants_executive_summary(text, intent):
             lines.append(self._executive_summary(current, vacant))
-        elif current and self._should_include_snapshot_summary(text, tool_results, intent):
+        elif current and self._should_include_snapshot_summary(
+            text, tool_results, intent
+        ):
             lines.append(self._snapshot_summary(current, vacant))
 
         if tool_results.get("rent_lease_comparison"):
             lines.append(
-                self._rent_lease_comparison_summary(tool_results["rent_lease_comparison"])
+                self._rent_lease_comparison_summary(
+                    tool_results["rent_lease_comparison"]
+                )
             )
 
         if tool_results.get("occupancy_trend"):
             lines.append(self._occupancy_trend_summary(tool_results["occupancy_trend"]))
 
         if tool_results.get("charge_breakdown"):
-            lines.append(self._charge_breakdown_summary(tool_results["charge_breakdown"]))
+            lines.append(
+                self._charge_breakdown_summary(tool_results["charge_breakdown"])
+            )
 
         if tool_results.get("top_balances"):
             lines.append(self._top_balances_summary(tool_results["top_balances"]))
@@ -1642,10 +1691,14 @@ class LangChainOrchestrator:
             lines.append(self._vacant_units_summary(tool_results["vacant_units"]))
 
         if tool_results.get("rent_by_unit_type"):
-            lines.append(self._rent_by_unit_type_summary(tool_results["rent_by_unit_type"]))
+            lines.append(
+                self._rent_by_unit_type_summary(tool_results["rent_by_unit_type"])
+            )
 
         if self._wants_location_answer(text):
-            lines.append(self._location_answer(profile, "property_content" in tool_results))
+            lines.append(
+                self._location_answer(profile, "property_content" in tool_results)
+            )
             if not self._wants_location_website_context(text):
                 return "\n\n".join(lines)
 
@@ -1674,7 +1727,9 @@ class LangChainOrchestrator:
                 )
                 if matched_line_details:
                     strong_matches = [
-                        detail for detail in matched_line_details if detail["score"] >= 2
+                        detail
+                        for detail in matched_line_details
+                        if detail["score"] >= 2
                     ]
                     if strong_matches:
                         matched_line_details = strong_matches
@@ -1748,7 +1803,9 @@ class LangChainOrchestrator:
             "property sample."
         )
 
-    def _clarification_answer(self, profile: dict, property_code: str, message: str) -> str:
+    def _clarification_answer(
+        self, profile: dict, property_code: str, message: str
+    ) -> str:
         text = message.strip().lower()
         if any(term in text for term in ["charge", "charges", "fee", "fees", "lease"]):
             return (
@@ -1781,7 +1838,9 @@ class LangChainOrchestrator:
             f"{active_name} data."
         )
 
-    def _property_scope_conflict(self, message: str, active_profile: dict) -> dict | None:
+    def _property_scope_conflict(
+        self, message: str, active_profile: dict
+    ) -> dict | None:
         return property_scope_conflict(
             message,
             active_profile,
@@ -1871,7 +1930,9 @@ class LangChainOrchestrator:
 
     @staticmethod
     def _location_answer(profile: dict, attempted_website_lookup: bool) -> str:
-        answer = f"The property address is **{profile.get('address', 'not available')}**."
+        answer = (
+            f"The property address is **{profile.get('address', 'not available')}**."
+        )
         source_site = profile.get("source_site")
         if attempted_website_lookup:
             answer += " I don't have a clean neighborhood summary in the scraped website sample."
@@ -1911,7 +1972,11 @@ class LangChainOrchestrator:
         lines = ["The property website lists these amenities:"]
         preferred_sections = ["Community Features", "Apartment Features"]
         ordered_sections = [
-            *[section for section in preferred_sections if section in amenities_by_section],
+            *[
+                section
+                for section in preferred_sections
+                if section in amenities_by_section
+            ],
             *[
                 section
                 for section in amenities_by_section
@@ -1924,7 +1989,9 @@ class LangChainOrchestrator:
             lines.append(f"\n**{section}**")
             lines.extend(f"- {item}" for item in items)
             if len(amenities_by_section[section]) > len(items):
-                lines.append(f"- Plus {len(amenities_by_section[section]) - len(items)} more")
+                lines.append(
+                    f"- Plus {len(amenities_by_section[section]) - len(items)} more"
+                )
 
         return "\n".join(lines)
 
@@ -2000,7 +2067,11 @@ class LangChainOrchestrator:
 
         section = metadata.get("section_heading") or ""
         title = metadata.get("title") or ""
-        name = section if section and section.lower() != "page overview" else title.split("|")[0]
+        name = (
+            section
+            if section and section.lower() != "page overview"
+            else title.split("|")[0]
+        )
         name = name.strip()
         if not name or len(name) > 40:
             return None
@@ -2013,7 +2084,9 @@ class LangChainOrchestrator:
         for line in self._clean_website_lines(result["content"], section=section):
             if line.lower() == name.lower():
                 continue
-            if re.search(r"\b\d+\s+beds?\b|\b\d+\s+baths?\b|sq\.\s*ft\.|/mo|den", line, re.I):
+            if re.search(
+                r"\b\d+\s+beds?\b|\b\d+\s+baths?\b|sq\.\s*ft\.|/mo|den", line, re.I
+            ):
                 detail_lines.append(line)
             if len(detail_lines) >= 4:
                 break
@@ -2052,10 +2125,14 @@ class LangChainOrchestrator:
             re.IGNORECASE,
         ):
             for token in re.findall(r"studio|[1-5]", match.group(1), re.IGNORECASE):
-                label = "Studio" if token.lower() == "studio" else f"{int(token)}-bedroom"
+                label = (
+                    "Studio" if token.lower() == "studio" else f"{int(token)}-bedroom"
+                )
                 if label not in labels:
                     labels.append(label)
-        for match in re.finditer(r"\b([1-5])\s+(?:bed(?:room)?s?)\b", text, re.IGNORECASE):
+        for match in re.finditer(
+            r"\b([1-5])\s+(?:bed(?:room)?s?)\b", text, re.IGNORECASE
+        ):
             label = f"{int(match.group(1))}-bedroom"
             if label not in labels:
                 labels.append(label)
@@ -2108,12 +2185,18 @@ class LangChainOrchestrator:
         if intent == "charge_breakdown":
             return True
         if "lease charge" in text and not any(
-            term in text for term in ["breakdown", "categor", "biggest", "largest", "top"]
+            term in text
+            for term in ["breakdown", "categor", "biggest", "largest", "top"]
         ):
             return False
         return any(
             term in text
-            for term in ["charge breakdown", "charge categor", "biggest charge", "largest charge"]
+            for term in [
+                "charge breakdown",
+                "charge categor",
+                "biggest charge",
+                "largest charge",
+            ]
         ) or ("fee" in text or "revenue" in text or "breakdown" in text)
 
     @staticmethod
@@ -2122,20 +2205,24 @@ class LangChainOrchestrator:
             return True
         if "vacant unit count" in text or "vacant count" in text:
             return False
-        if "vacant" in text and "unit" in text and any(
-            term in text
-            for term in [
-                "all",
-                "detail",
-                "give me",
-                "list",
-                "only",
-                "show",
-                "their",
-                "those",
-                "type",
-                "which",
-            ]
+        if (
+            "vacant" in text
+            and "unit" in text
+            and any(
+                term in text
+                for term in [
+                    "all",
+                    "detail",
+                    "give me",
+                    "list",
+                    "only",
+                    "show",
+                    "their",
+                    "those",
+                    "type",
+                    "which",
+                ]
+            )
         ):
             return True
         return any(
@@ -2167,7 +2254,13 @@ class LangChainOrchestrator:
             return True
         return "occupancy" in text and any(
             term in text
-            for term in ["available months", "across months", "changed", "change", "month-to-month"]
+            for term in [
+                "available months",
+                "across months",
+                "changed",
+                "change",
+                "month-to-month",
+            ]
         )
 
     @staticmethod
@@ -2214,11 +2307,12 @@ class LangChainOrchestrator:
             if LangChainOrchestrator._contains_any(text, rule["allowed_terms"]):
                 continue
             has_metric = LangChainOrchestrator._contains_any(text, rule["metric_terms"])
-            has_aggregate = LangChainOrchestrator._contains_any(text, rule["aggregate_terms"])
+            has_aggregate = LangChainOrchestrator._contains_any(
+                text, rule["aggregate_terms"]
+            )
             grouping_terms = rule["grouping_terms"]
-            has_grouping = (
-                not grouping_terms
-                or LangChainOrchestrator._contains_any(text, grouping_terms)
+            has_grouping = not grouping_terms or LangChainOrchestrator._contains_any(
+                text, grouping_terms
             )
             if has_metric and has_aggregate and has_grouping:
                 return str(rule["label"])
@@ -2229,7 +2323,9 @@ class LangChainOrchestrator:
         return None
 
     @staticmethod
-    def _supported_structured_capability(text: str, intent: str | None = None) -> str | None:
+    def _supported_structured_capability(
+        text: str, intent: str | None = None
+    ) -> str | None:
         if LangChainOrchestrator._wants_executive_summary(text, intent):
             return "latest_kpis"
         if LangChainOrchestrator._wants_kpi_cards(text, intent):
@@ -2265,7 +2361,9 @@ class LangChainOrchestrator:
             ]
         ):
             return "latest_kpis"
-        if any(term in text for term in ["top balance", "top balances", "highest balance"]):
+        if any(
+            term in text for term in ["top balance", "top balances", "highest balance"]
+        ):
             return "top_balances"
 
         return None
@@ -2276,14 +2374,11 @@ class LangChainOrchestrator:
 
     @staticmethod
     def _wants_amenity_list(text: str, intent: str | None = None) -> bool:
-        return (
-            intent == "amenity_list"
-            or (
-                ("amenit" in text or "feature" in text)
-                and any(term in text for term in ["what", "list", "listed", "show"])
-                and not any(
-                    term in text for term in ["ev", "charging", "bike", "parking", "pet"]
-                )
+        return intent == "amenity_list" or (
+            ("amenit" in text or "feature" in text)
+            and any(term in text for term in ["what", "list", "listed", "show"])
+            and not any(
+                term in text for term in ["ev", "charging", "bike", "parking", "pet"]
             )
         )
 
@@ -2297,14 +2392,11 @@ class LangChainOrchestrator:
 
     @staticmethod
     def _wants_floorplan_answer(text: str, intent: str | None = None) -> bool:
-        return (
-            intent == "floorplans"
-            or (
-                ("floorplan" in text or "floor plan" in text or "bedroom" in text)
-                and any(
-                    term in text
-                    for term in ["advertised", "available", "list", "show", "what"]
-                )
+        return intent == "floorplans" or (
+            ("floorplan" in text or "floor plan" in text or "bedroom" in text)
+            and any(
+                term in text
+                for term in ["advertised", "available", "list", "show", "what"]
             )
         )
 
@@ -2348,7 +2440,9 @@ class LangChainOrchestrator:
 
     @staticmethod
     def _requested_years(message: str) -> list[int]:
-        return list(dict.fromkeys(int(match.group(1)) for match in YEAR_RE.finditer(message)))
+        return list(
+            dict.fromkeys(int(match.group(1)) for match in YEAR_RE.finditer(message))
+        )
 
     def _snapshot_summary(self, current: dict, vacant: dict | None) -> str:
         summary = (
@@ -2359,7 +2453,9 @@ class LangChainOrchestrator:
             f"**{self._format_money(current['lease_charges'])}**."
         )
         if vacant:
-            summary += f" The latest summary shows **{vacant['unit_count']} vacant units**."
+            summary += (
+                f" The latest summary shows **{vacant['unit_count']} vacant units**."
+            )
         return summary
 
     def _executive_summary(self, current: dict, vacant: dict | None) -> str:
@@ -2501,16 +2597,16 @@ class LangChainOrchestrator:
             f"**unit {row['unit']}** at {self._format_money(row['balance'])}"
             for row in top_rows
         )
-        return f"As of **{report_month}**, the highest resident balances are {top_text}."
+        return (
+            f"As of **{report_month}**, the highest resident balances are {top_text}."
+        )
 
     def _vacant_units_summary(self, rows: list[dict]) -> str:
         if not rows:
             return "I could not find vacant-unit detail for this property."
 
         report_month = rows[0].get("report_month")
-        units = ", ".join(
-            self._vacant_unit_label(row) for row in rows[:8]
-        )
+        units = ", ".join(self._vacant_unit_label(row) for row in rows[:8])
         extra = "" if len(rows) <= 8 else f", plus {len(rows) - 8} more"
         return (
             f"As of **{report_month}**, there are **{len(rows)} vacant units**. "
@@ -2547,8 +2643,7 @@ class LangChainOrchestrator:
         bedroom_sentence = ""
         if bedroom_rows:
             bedroom_text = ", ".join(
-                f"**{row['bedroom_category']}** at "
-                f"{self._format_money(row['avg_market_rent'])}"
+                f"**{row['bedroom_category']}** at {self._format_money(row['avg_market_rent'])}"
                 for row in bedroom_rows
             )
             bedroom_sentence = (
@@ -2575,7 +2670,9 @@ class LangChainOrchestrator:
     def _rent_by_bedroom_category(self, rows: list[dict]) -> list[dict]:
         buckets: dict[str, dict[str, Any]] = {}
         for row in rows:
-            category = self._bedroom_category_from_unit_type(str(row.get("unit_type", "")))
+            category = self._bedroom_category_from_unit_type(
+                str(row.get("unit_type", ""))
+            )
             if not category:
                 continue
 
@@ -2602,7 +2699,9 @@ class LangChainOrchestrator:
                 {
                     "bedroom_category": bucket["bedroom_category"],
                     "unit_count": unit_count,
-                    "avg_market_rent": round(bucket["weighted_rent_total"] / unit_count, 2),
+                    "avg_market_rent": round(
+                        bucket["weighted_rent_total"] / unit_count, 2
+                    ),
                 }
             )
         return sorted(
@@ -2690,7 +2789,9 @@ class LangChainOrchestrator:
         return list(dict.fromkeys(tokens))
 
     @staticmethod
-    def _yes_no_retrieval_answer(matched_terms: set[str], evidence: list[dict[str, str]]) -> str:
+    def _yes_no_retrieval_answer(
+        matched_terms: set[str], evidence: list[dict[str, str]]
+    ) -> str:
         amenities = []
         if "bike" in matched_terms or "storage" in matched_terms:
             amenities.append("bike storage")
@@ -2700,8 +2801,7 @@ class LangChainOrchestrator:
             amenities.append("pet-friendly features")
 
         details = [
-            f"- **{item['section']}**: {item['snippet']}"
-            for item in evidence[:3]
+            f"- **{item['section']}**: {item['snippet']}" for item in evidence[:3]
         ]
         if amenities:
             intro = f"Yes, this property has {LangChainOrchestrator._join_phrase(amenities)}."
@@ -2746,10 +2846,7 @@ class LangChainOrchestrator:
                 f"Specifically, it lists **{snippet}** under **{section}**."
             )
 
-        return (
-            "The property website has matching evidence: "
-            f"**{snippet}** under **{section}**."
-        )
+        return f"The property website has matching evidence: **{snippet}** under **{section}**."
 
     @staticmethod
     def _clean_snippet_spacing(text: str) -> str:
@@ -2762,8 +2859,7 @@ class LangChainOrchestrator:
         if not evidence:
             return "I don't see matching website evidence for that in the selected property sample."
         details = [
-            f"- **{item['section']}**: {item['snippet']}"
-            for item in evidence[:3]
+            f"- **{item['section']}**: {item['snippet']}" for item in evidence[:3]
         ]
         return (
             "Here is what I found on the selected property's website:\n\n"
@@ -2811,7 +2907,9 @@ class LangChainOrchestrator:
         )
 
     @classmethod
-    def _clean_website_lines(cls, content: str, section: str | None = None) -> list[str]:
+    def _clean_website_lines(
+        cls, content: str, section: str | None = None
+    ) -> list[str]:
         skipped = {section.lower()} if section else set()
         cleaned_lines: list[str] = []
         for raw_line in content.splitlines():
@@ -2867,10 +2965,18 @@ class LangChainOrchestrator:
             return True
         return text.rstrip().endswith("?") and any(
             term in text
-            for term in ["amenity", "feature", "website", "available", "included", "listed"]
+            for term in [
+                "amenity",
+                "feature",
+                "website",
+                "available",
+                "included",
+                "listed",
+            ]
         )
 
     def _call_tool(self, tool_name: str, **kwargs: Any) -> Any:
+        raise_if_cancelled(self._cancellation_check)
         arguments = dict(kwargs)
         property_code = arguments.pop("property_code", None)
         result = self.tool_executor.execute(
@@ -2882,6 +2988,7 @@ class LangChainOrchestrator:
                 run_id=self._run_id,
             ),
         )
+        raise_if_cancelled(self._cancellation_check)
         self._tool_invocations.append(result)
         if result.status == "failed":
             error = result.error
@@ -3014,9 +3121,7 @@ class LangChainOrchestrator:
             ):
                 continue
             if require_complete_match and len(required_terms) > 1:
-                matched_terms = {
-                    term for term in evidence.get("matched_terms", [])
-                }
+                matched_terms = {term for term in evidence.get("matched_terms", [])}
                 if not required_terms.issubset(matched_terms):
                     continue
             filtered.append(result)
@@ -3025,7 +3130,9 @@ class LangChainOrchestrator:
     @staticmethod
     def _passes_evidence_confidence(evidence: dict, minimum: str) -> bool:
         actual = str(evidence.get("confidence") or "low")
-        return EVIDENCE_CONFIDENCE_RANK.get(actual, 0) >= EVIDENCE_CONFIDENCE_RANK[minimum]
+        return (
+            EVIDENCE_CONFIDENCE_RANK.get(actual, 0) >= EVIDENCE_CONFIDENCE_RANK[minimum]
+        )
 
     def _has_confident_evidence(
         self,
@@ -3045,9 +3152,13 @@ class LangChainOrchestrator:
         text = message.lower()
         if intent in {"amenity_list", "floorplans", "gallery", "location"}:
             return False
-        if self._wants_amenity_list(text, intent) or self._wants_floorplan_answer(text, intent):
+        if self._wants_amenity_list(text, intent) or self._wants_floorplan_answer(
+            text, intent
+        ):
             return False
-        return self._is_yes_no_question(message) or self._looks_like_property_fact_question(message)
+        return self._is_yes_no_question(
+            message
+        ) or self._looks_like_property_fact_question(message)
 
     def _annotate_retrieval_evidence(
         self,
@@ -3098,7 +3209,10 @@ class LangChainOrchestrator:
         if not line_details:
             return "low"
         if required_terms and required_terms.issubset(matched_terms):
-            if result.get("vector_rank") is not None and result.get("keyword_rank") is not None:
+            if (
+                result.get("vector_rank") is not None
+                and result.get("keyword_rank") is not None
+            ):
                 return "high"
             return "medium"
         if len(matched_terms) >= 2:
@@ -3107,11 +3221,15 @@ class LangChainOrchestrator:
 
     @staticmethod
     def _wants_location_answer(text: str) -> bool:
-        return any(term in text for term in ["address", "located", "location", "where is"])
+        return any(
+            term in text for term in ["address", "located", "location", "where is"]
+        )
 
     @staticmethod
     def _wants_location_website_context(text: str) -> bool:
-        return any(term in text for term in ["website", "neighborhood", "nearby", "context"])
+        return any(
+            term in text for term in ["website", "neighborhood", "nearby", "context"]
+        )
 
     @staticmethod
     def _sources_from_retrieval(results: list[dict]) -> list[Source]:

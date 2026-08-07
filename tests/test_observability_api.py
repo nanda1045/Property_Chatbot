@@ -64,6 +64,7 @@ class ObservabilityApiTests(unittest.TestCase):
                 calls.append(("events", kwargs))
                 return [
                     {
+                        "sequence_id": 8,
                         "event_id": "event-1",
                         "run_id": "run-1",
                         "event_type": "run_completed",
@@ -105,7 +106,9 @@ class ObservabilityApiTests(unittest.TestCase):
         with patch("app.main.AgentRuntime", FakeRuntime):
             run_response = self.client.get(f"/api/agent-runs/run-1?{query}")
             step_response = self.client.get(f"/api/agent-runs/run-1/steps?{query}")
-            event_response = self.client.get(f"/api/agent-runs/run-1/events?{query}")
+            event_response = self.client.get(
+                f"/api/agent-runs/run-1/events?{query}&after_sequence=7"
+            )
             citation_response = self.client.get(
                 f"/api/agent-runs/run-1/citations?{query}"
             )
@@ -113,6 +116,8 @@ class ObservabilityApiTests(unittest.TestCase):
         self.assertEqual(run_response.status_code, 200)
         self.assertEqual(step_response.json()[0]["duration_ms"], 1000)
         self.assertEqual(event_response.json()[0]["event_type"], "run_completed")
+        event_call = next(kwargs for name, kwargs in calls if name == "events")
+        self.assertEqual(event_call["after_sequence"], 7)
         self.assertEqual(
             citation_response.json()[0]["query_parameters"], {"months": 12}
         )

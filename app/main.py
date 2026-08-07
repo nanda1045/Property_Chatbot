@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import queue
-import threading
 from typing import Annotated
 from uuid import uuid4
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from app.agents.cancellation import AgentRunCancelledError
 from app.agents.runtime import AgentRunConflictError, AgentRunNotFoundError, AgentRuntime
 from app.core.config import Settings, get_settings
 from app.db.mysql import MySQLDatabase
@@ -29,9 +30,18 @@ from app.schemas import (
 )
 from app.services.conversation_memory import ConversationMemory
 from app.services.rent_roll_repository import RentRollRepository
+from app.services.run_stream import (
+    BoundedStreamExecutor,
+    RunStreamBuffer,
+    StreamExecutorSaturatedError,
+    active_run_cancellations,
+)
 from app.services.sql_approval import execute_approved_sql
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+
+_STREAM_WORKERS = BoundedStreamExecutor(max_workers=8, max_pending=8)
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
 app = FastAPI(
@@ -239,6 +249,7 @@ def get_agent_run_events(
     property_code: str,
     conversation_id: str,
     settings: SettingsDep,
+    after_sequence: int = Query(default=0, ge=0),
 ) -> list[AgentRunEvent]:
     try:
         events = AgentRuntime(settings).list_run_events(
@@ -246,10 +257,100 @@ def get_agent_run_events(
             property_code=property_code,
             conversation_id=conversation_id,
             user_id=settings.runtime_user_id,
+            after_sequence=after_sequence,
         )
     except AgentRunNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     return [AgentRunEvent.model_validate(event) for event in events]
+
+
+@app.get("/api/agent-runs/{run_id}/stream")
+async def stream_agent_run_events(
+    run_id: str,
+    request: Request,
+    property_code: str,
+    conversation_id: str,
+    settings: SettingsDep,
+    after_sequence: int = Query(default=0, ge=0),
+    follow: bool = True,
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    """Replay durable run events and optionally follow until a terminal status."""
+    cursor = after_sequence
+    if last_event_id:
+        try:
+            parsed_event_id = int(last_event_id)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail="Last-Event-ID must be an event sequence number",
+            ) from error
+        if parsed_event_id < 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Last-Event-ID must be a non-negative event sequence number",
+            )
+        cursor = max(cursor, parsed_event_id)
+    runtime = AgentRuntime(settings)
+    try:
+        runtime.get_run(
+            run_id=run_id,
+            property_code=property_code,
+            conversation_id=conversation_id,
+            user_id=settings.runtime_user_id,
+        )
+    except AgentRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+    async def durable_event_stream():
+        nonlocal cursor
+        last_heartbeat = asyncio.get_running_loop().time()
+        while True:
+            if await request.is_disconnected():
+                break
+            events = runtime.list_run_events(
+                run_id=run_id,
+                property_code=property_code,
+                conversation_id=conversation_id,
+                user_id=settings.runtime_user_id,
+                after_sequence=cursor,
+            )
+            for event in events:
+                sequence_id = int(event.get("sequence_id") or cursor)
+                cursor = max(cursor, sequence_id)
+                yield _encode_sse("run_event", event, event_id=str(sequence_id))
+
+            detail = runtime.get_run(
+                run_id=run_id,
+                property_code=property_code,
+                conversation_id=conversation_id,
+                user_id=settings.runtime_user_id,
+            )
+            if detail["status"] in _TERMINAL_RUN_STATUSES or not follow:
+                yield _encode_sse(
+                    "run_status",
+                    {
+                        "run_id": run_id,
+                        "conversation_id": conversation_id,
+                        "property_code": property_code.lower(),
+                        "status": detail["status"],
+                        "final_answer": detail.get("final_answer"),
+                    },
+                    event_id=str(cursor) if cursor else None,
+                )
+                break
+
+            now = asyncio.get_running_loop().time()
+            if now - last_heartbeat >= settings.stream_heartbeat_seconds:
+                yield ": keep-alive\n\n"
+                last_heartbeat = now
+            await asyncio.sleep(settings.stream_poll_interval_seconds)
+
+    return StreamingResponse(
+        durable_event_stream(),
+        media_type="text/event-stream",
+        headers=_sse_headers(),
+    )
 
 
 @app.get("/api/agent-runs/{run_id}/citations")
@@ -288,6 +389,7 @@ def cancel_agent_run(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except AgentRunConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    active_run_cancellations.request(run_id)
     return AgentRunDetail.model_validate(detail)
 
 
@@ -331,64 +433,141 @@ def _record_approval_response(
 
 
 @app.post("/chat/stream")
-def chat_stream(request: ChatRequest, settings: SettingsDep) -> StreamingResponse:
-    def encode_event(event: str, payload: dict) -> str:
-        return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=True)}\n\n"
+async def chat_stream(
+    chat_request: ChatRequest,
+    http_request: Request,
+    settings: SettingsDep,
+) -> StreamingResponse:
+    conversation_id = chat_request.conversation_id or str(uuid4())
+    run_id = str(uuid4())
+    buffer = RunStreamBuffer(settings.stream_queue_max_size)
+    runtime = AgentRuntime(settings)
+    active_run_cancellations.register(run_id, buffer.cancelled)
 
-    def event_stream():
-        events: queue.Queue[tuple[str, dict] | None] = queue.Queue()
+    def run_chat() -> None:
+        try:
+            memory = _conversation_memory(settings)
+            history = memory.get(
+                user_id=settings.runtime_user_id,
+                conversation_id=conversation_id,
+                property_code=chat_request.property_code,
+            )
+            response = runtime.answer(
+                property_code=chat_request.property_code,
+                message=chat_request.message,
+                model=chat_request.model,
+                on_token=buffer.publish_token,
+                history=history,
+                conversation_id=conversation_id,
+                user_id=settings.runtime_user_id,
+                run_id=run_id,
+                cancellation_requested=buffer.cancelled.is_set,
+            )
+            response.conversation_id = conversation_id
+            memory.add(
+                user_id=settings.runtime_user_id,
+                conversation_id=conversation_id,
+                property_code=response.property_code,
+                run_id=response.run_id,
+                user_message=chat_request.message,
+                assistant_answer=response.answer_markdown,
+                tool_result_keys=sorted(response.tool_results),
+                component_types=[component.type for component in response.components],
+            )
+            buffer.publish("final", response.model_dump(mode="json"))
+        except AgentRunCancelledError:
+            pass
+        except Exception as error:
+            buffer.publish("error", {"detail": str(error), "run_id": run_id})
+        finally:
+            buffer.close()
 
-        def publish_token(token: str) -> None:
-            events.put(("token", {"delta": token}))
+    try:
+        worker = _STREAM_WORKERS.submit(run_chat)
+    except StreamExecutorSaturatedError as error:
+        active_run_cancellations.unregister(run_id, buffer.cancelled)
+        raise HTTPException(
+            status_code=503,
+            detail="stream capacity is currently exhausted; retry shortly",
+        ) from error
 
-        def run_chat() -> None:
+    def release_worker_registration(_future) -> None:
+        active_run_cancellations.unregister(run_id, buffer.cancelled)
+
+    worker.add_done_callback(release_worker_registration)
+
+    async def event_stream():
+        stream_finished = False
+        yield _encode_sse(
+            "status",
+            {
+                "message": "started",
+                "run_id": run_id,
+                "conversation_id": conversation_id,
+                "property_code": chat_request.property_code.lower(),
+                "reconnect_url": f"/api/agent-runs/{run_id}/stream",
+            },
+        )
+        try:
+            while True:
+                if await http_request.is_disconnected():
+                    break
+                try:
+                    item = buffer.get(timeout=0)
+                except queue.Empty:
+                    await asyncio.sleep(settings.stream_poll_interval_seconds)
+                    continue
+                if item is None:
+                    stream_finished = True
+                    break
+                yield _encode_sse(item.event, item.payload)
+        finally:
+            if not stream_finished and not worker.done():
+                buffer.request_cancellation()
+                try:
+                    runtime.cancel_run(
+                        run_id=run_id,
+                        property_code=chat_request.property_code,
+                        conversation_id=conversation_id,
+                        user_id=settings.runtime_user_id,
+                    )
+                except (AgentRunNotFoundError, AgentRunConflictError):
+                    pass
             try:
-                conversation_id = request.conversation_id or str(uuid4())
-                memory = _conversation_memory(settings)
-                history = memory.get(
-                    user_id=settings.runtime_user_id,
-                    conversation_id=conversation_id,
-                    property_code=request.property_code,
+                await asyncio.wait_for(
+                    asyncio.shield(asyncio.wrap_future(worker)),
+                    timeout=settings.stream_thread_join_seconds,
                 )
-                runtime = AgentRuntime(settings)
-                response = runtime.answer(
-                    property_code=request.property_code,
-                    message=request.message,
-                    model=request.model,
-                    on_token=publish_token,
-                    history=history,
-                    conversation_id=conversation_id,
-                    user_id=settings.runtime_user_id,
-                )
-                response.conversation_id = conversation_id
-                memory.add(
-                    user_id=settings.runtime_user_id,
-                    conversation_id=conversation_id,
-                    property_code=response.property_code,
-                    run_id=response.run_id,
-                    user_message=request.message,
-                    assistant_answer=response.answer_markdown,
-                    tool_result_keys=sorted(response.tool_results),
-                    component_types=[component.type for component in response.components],
-                )
-                events.put(("final", response.model_dump()))
-            except Exception as error:
-                events.put(("error", {"detail": str(error)}))
-            finally:
-                events.put(None)
+            except TimeoutError:
+                buffer.request_cancellation()
 
-        thread = threading.Thread(target=run_chat, daemon=True)
-        thread.start()
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers=_sse_headers(),
+    )
 
-        yield encode_event("status", {"message": "started"})
-        while True:
-            item = events.get()
-            if item is None:
-                break
-            event, payload = item
-            yield encode_event(event, payload)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+def _encode_sse(
+    event: str,
+    payload: dict,
+    *,
+    event_id: str | None = None,
+) -> str:
+    lines = []
+    if event_id is not None:
+        lines.append(f"id: {event_id}")
+    lines.append(f"event: {event}")
+    lines.append(f"data: {json.dumps(payload, ensure_ascii=True, default=str)}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _sse_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
 
 
 def _conversation_memory(settings: Settings) -> ConversationMemory:

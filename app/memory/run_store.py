@@ -51,7 +51,9 @@ class RunDatabase(Protocol):
         self, query: str, params: tuple[Any, ...] = ()
     ) -> dict[str, Any] | None: ...
 
-    def fetch_all(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]: ...
+    def fetch_all(
+        self, query: str, params: tuple[Any, ...] = ()
+    ) -> list[dict[str, Any]]: ...
 
 
 def _json_dump(value: Any) -> str:
@@ -436,10 +438,11 @@ class AgentRunStore:
         user_id: str,
         conversation_id: str,
         property_code: str,
+        after_sequence: int = 0,
     ) -> list[dict[str, Any]]:
         rows = self.database.fetch_all(
             """
-            SELECT events.event_id, events.run_id, events.event_type,
+            SELECT events.sequence_id, events.event_id, events.run_id, events.event_type,
                    events.conversation_id, events.property_code, events.step_id,
                    events.tool_name, events.attempt, events.duration_ms,
                    events.event_timestamp AS timestamp, events.error_type,
@@ -450,9 +453,16 @@ class AgentRunStore:
               AND runs.conversation_id = %s AND runs.property_code = %s
               AND events.conversation_id = runs.conversation_id
               AND events.property_code = runs.property_code
+              AND events.sequence_id > %s
             ORDER BY events.sequence_id
             """,
-            (run_id, user_id, conversation_id, property_code.lower()),
+            (
+                run_id,
+                user_id,
+                conversation_id,
+                property_code.lower(),
+                after_sequence,
+            ),
         )
         for row in rows:
             row["payload"] = _json_load(row.pop("payload_json", None), {})
@@ -591,7 +601,9 @@ class AgentRunStore:
 
     @staticmethod
     def _is_private_payload_key(key: str) -> bool:
-        normalized = "".join(character for character in key.lower() if character.isalnum())
+        normalized = "".join(
+            character for character in key.lower() if character.isalnum()
+        )
         return normalized in PRIVATE_PAYLOAD_KEYS
 
     def _persist_artifacts(self, state: AgentState) -> None:
@@ -600,9 +612,7 @@ class AgentRunStore:
             artifact_id = str(artifact.get("artifact_id") or uuid4())
             artifact["artifact_id"] = artifact_id
             artifact_type = str(artifact.get("type") or "structured_output")
-            name = str(
-                artifact.get("name") or artifact_type.replace("_", " ").title()
-            )
+            name = str(artifact.get("name") or artifact_type.replace("_", " ").title())
             content_json = _json_dump(artifact)
             content_hash = sha256(content_json.encode("utf-8")).hexdigest()
             self.database.execute(

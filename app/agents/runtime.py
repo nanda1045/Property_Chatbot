@@ -8,6 +8,11 @@ from time import perf_counter
 from typing import Any, Protocol
 from uuid import uuid4
 
+from app.agents.cancellation import (
+    AgentRunCancelledError,
+    CancellationCheck,
+    raise_if_cancelled,
+)
 from app.agents.state import (
     TERMINAL_RUN_STATUSES,
     AgentState,
@@ -81,6 +86,7 @@ class RunStore(Protocol):
         user_id: str,
         conversation_id: str,
         property_code: str,
+        after_sequence: int = 0,
     ) -> list[dict[str, Any]]: ...
 
     def list_citations_scoped(
@@ -192,7 +198,12 @@ class AgentRuntime:
         sql_approval_count = int(getattr(workflow, "sql_approval_count", 0))
         if state["plan"] and execution_plan:
             state["plan"][0]["actions"] = execution_plan
-        if execution_plan or execution_observations or planner_attempts or sql_approval_count:
+        if (
+            execution_plan
+            or execution_observations
+            or planner_attempts
+            or sql_approval_count
+        ):
             state["observations"].append(
                 {
                     "type": "bounded_agent_loop",
@@ -212,6 +223,8 @@ class AgentRuntime:
         history: list[dict[str, Any]] | None = None,
         conversation_id: str | None = None,
         user_id: str | None = None,
+        run_id: str | None = None,
+        cancellation_requested: CancellationCheck | None = None,
     ) -> ChatResponse:
         if not conversation_id:
             raise ValueError("conversation_id is required for durable agent execution")
@@ -224,6 +237,7 @@ class AgentRuntime:
             user_goal=message,
             max_steps=self.settings.agent_max_steps,
             max_tool_calls=self.settings.agent_max_tool_calls,
+            run_id=run_id,
         )
         run_store = self._run_store_factory(self.settings)
         run_store.create(state)
@@ -262,6 +276,7 @@ class AgentRuntime:
 
         step_id: str | None = None
         try:
+            raise_if_cancelled(cancellation_requested)
             workflow = self._workflow_factory(self.settings)
             transition_agent_state(state, "running")
             state["plan"][0]["status"] = "running"
@@ -288,14 +303,22 @@ class AgentRuntime:
                         step_id,
                         event,
                     ),
+                    cancellation_check=cancellation_requested,
                 )
+
+            def publish_token(token: str) -> None:
+                raise_if_cancelled(cancellation_requested)
+                if on_token is not None:
+                    on_token(token)
+
             response = workflow.answer(
                 property_code=property_code,
                 message=message,
                 model=model,
-                on_token=on_token,
+                on_token=publish_token if on_token is not None else None,
                 history=history,
             )
+            raise_if_cancelled(cancellation_requested)
             self._capture_workflow_execution(state, workflow)
             response.run_id = state["run_id"]
             if response.investigation is not None:
@@ -350,7 +373,9 @@ class AgentRuntime:
                 {
                     "step": state["current_step"],
                     "tool_result_keys": sorted(response.tool_results),
-                    "component_types": [component.type for component in response.components],
+                    "component_types": [
+                        component.type for component in response.components
+                    ],
                 }
             )
             pending_component = next(
@@ -389,6 +414,7 @@ class AgentRuntime:
                     step_id=step_id,
                 )
                 run_store.checkpoint(state, "verification_started")
+                raise_if_cancelled(cancellation_requested)
                 if (
                     response.investigation is not None
                     and response.investigation.trace_summary.verification_status
@@ -410,6 +436,7 @@ class AgentRuntime:
                     "tool_result_keys": sorted(response.tool_results),
                 },
             )
+            raise_if_cancelled(cancellation_requested)
             run_store.save(state)
             run_store.checkpoint(state, "step_completed")
             run_store.checkpoint(
@@ -431,6 +458,9 @@ class AgentRuntime:
                 )
             response.run_status = state["status"]
             return response
+        except AgentRunCancelledError:
+            self._persist_interrupted_cancellation(run_store, state, step_id)
+            raise
         except Exception as error:
             error_data = {"type": type(error).__name__, "message": str(error)}
             if state["status"] not in TERMINAL_RUN_STATUSES:
@@ -442,7 +472,9 @@ class AgentRuntime:
                 transition_agent_state(state, "failed")
                 try:
                     if step_id is not None:
-                        run_store.finish_step(step_id, status="failed", error=error_data)
+                        run_store.finish_step(
+                            step_id, status="failed", error=error_data
+                        )
                     run_store.save(state)
                     if verification_was_active:
                         run_store.record_event(
@@ -465,6 +497,56 @@ class AgentRuntime:
                 except Exception:
                     pass
             raise
+
+    @staticmethod
+    def _persist_interrupted_cancellation(
+        run_store: RunStore,
+        state: AgentState,
+        step_id: str | None,
+    ) -> None:
+        """Make cooperative transport cancellation durable exactly once."""
+        latest = run_store.load_scoped(
+            state["run_id"],
+            state["user_id"],
+            state["conversation_id"],
+            state["property_code"],
+        )
+        already_cancelled = latest is not None and latest["status"] == "cancelled"
+        claimed = False
+        if not already_cancelled:
+            claimed = run_store.claim_cancellation(
+                state["run_id"],
+                state["user_id"],
+                state["conversation_id"],
+                state["property_code"],
+            )
+        if not already_cancelled and not claimed:
+            return
+
+        cancelled_state = latest if latest is not None else state
+        for plan_step in cancelled_state["plan"]:
+            if plan_step.get("status") in {
+                "pending",
+                "running",
+                "waiting_for_approval",
+            }:
+                plan_step["status"] = "cancelled"
+        if cancelled_state["status"] != "cancelled":
+            transition_agent_state(cancelled_state, "cancelled")
+        if step_id is not None:
+            try:
+                run_store.finish_step(step_id, status="cancelled")
+            except LookupError:
+                pass
+        run_store.save(cancelled_state)
+        if claimed:
+            run_store.record_event(
+                cancelled_state,
+                "run_cancelled",
+                step_id=step_id,
+                payload={"reason": "client_disconnected"},
+            )
+            run_store.checkpoint(cancelled_state, "run_cancelled")
 
     def resolve_sql_approval(
         self,
@@ -496,9 +578,13 @@ class AgentRuntime:
         pending = state["pending_approval"]
         if not pending or not isinstance(pending.get("sql"), str):
             raise AgentRunConflictError("run has no valid pending SQL approval")
-        pending_property_code = str(pending.get("property_code") or normalized_code).lower()
+        pending_property_code = str(
+            pending.get("property_code") or normalized_code
+        ).lower()
         if pending_property_code != normalized_code:
-            raise AgentRunConflictError("pending SQL approval has a different property scope")
+            raise AgentRunConflictError(
+                "pending SQL approval has a different property scope"
+            )
         if not run_store.claim_approval(run_id, trusted_user_id, normalized_code):
             raise AgentRunConflictError("approval was already claimed or resolved")
 
@@ -734,12 +820,15 @@ class AgentRuntime:
         user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         store = self._run_store_factory(self.settings)
-        if store.get_run_detail(
-            run_id,
-            user_id or self.settings.runtime_user_id,
-            conversation_id,
-            property_code.lower(),
-        ) is None:
+        if (
+            store.get_run_detail(
+                run_id,
+                user_id or self.settings.runtime_user_id,
+                conversation_id,
+                property_code.lower(),
+            )
+            is None
+        ):
             raise AgentRunNotFoundError("agent run was not found")
         return store.list_steps_scoped(
             run_id,
@@ -755,20 +844,25 @@ class AgentRuntime:
         property_code: str,
         conversation_id: str,
         user_id: str | None = None,
+        after_sequence: int = 0,
     ) -> list[dict[str, Any]]:
         store = self._run_store_factory(self.settings)
-        if store.get_run_detail(
-            run_id,
-            user_id or self.settings.runtime_user_id,
-            conversation_id,
-            property_code.lower(),
-        ) is None:
+        if (
+            store.get_run_detail(
+                run_id,
+                user_id or self.settings.runtime_user_id,
+                conversation_id,
+                property_code.lower(),
+            )
+            is None
+        ):
             raise AgentRunNotFoundError("agent run was not found")
         return store.list_events(
             run_id,
             user_id or self.settings.runtime_user_id,
             conversation_id,
             property_code.lower(),
+            after_sequence,
         )
 
     def list_run_citations(
@@ -782,12 +876,15 @@ class AgentRuntime:
         store = self._run_store_factory(self.settings)
         trusted_user_id = user_id or self.settings.runtime_user_id
         normalized_code = property_code.lower()
-        if store.get_run_detail(
-            run_id,
-            trusted_user_id,
-            conversation_id,
-            normalized_code,
-        ) is None:
+        if (
+            store.get_run_detail(
+                run_id,
+                trusted_user_id,
+                conversation_id,
+                normalized_code,
+            )
+            is None
+        ):
             raise AgentRunNotFoundError("agent run was not found")
         return store.list_citations_scoped(
             run_id,
@@ -826,7 +923,11 @@ class AgentRuntime:
             raise AgentRunConflictError("run could not be cancelled")
 
         for plan_step in state["plan"]:
-            if plan_step.get("status") in {"pending", "running", "waiting_for_approval"}:
+            if plan_step.get("status") in {
+                "pending",
+                "running",
+                "waiting_for_approval",
+            }:
                 plan_step["status"] = "cancelled"
         if state["pending_approval"] is not None:
             state["pending_approval"]["status"] = "cancelled"

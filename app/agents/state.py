@@ -63,6 +63,7 @@ def new_agent_state(
     user_goal: str,
     max_steps: int = 8,
     max_tool_calls: int = 12,
+    run_id: str | None = None,
 ) -> AgentState:
     """Create a new state with backend-owned identity, scope, and budgets."""
     if not conversation_id.strip():
@@ -77,7 +78,7 @@ def new_agent_state(
         raise ValueError("execution budgets must be positive")
 
     return AgentState(
-        run_id=str(uuid4()),
+        run_id=run_id or str(uuid4()),
         conversation_id=conversation_id,
         user_id=user_id,
         property_code=property_code.lower(),

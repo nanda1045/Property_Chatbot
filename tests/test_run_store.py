@@ -126,7 +126,9 @@ class MemoryDatabase:
             return 1
         raise AssertionError(f"Unexpected query: {normalized}")
 
-    def fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
+    def fetch_one(
+        self, query: str, params: tuple[Any, ...] = ()
+    ) -> dict[str, Any] | None:
         normalized = " ".join(query.split())
         if "FROM agent_checkpoints AS checkpoints" in normalized:
             run_id, user_id, conversation_id, property_code = params
@@ -155,10 +157,15 @@ class MemoryDatabase:
             return dict(row)
         return None
 
-    def fetch_all(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    def fetch_all(
+        self, query: str, params: tuple[Any, ...] = ()
+    ) -> list[dict[str, Any]]:
         run_id, user_id, property_code = params
         run = self.runs.get(str(run_id))
-        if not run or (run["user_id"], run["property_code"]) != (user_id, property_code):
+        if not run or (run["user_id"], run["property_code"]) != (
+            user_id,
+            property_code,
+        ):
             return []
         rows = [row.copy() for row in self.steps.values() if row["run_id"] == run_id]
         return sorted(rows, key=lambda row: row["step_number"])
@@ -192,16 +199,16 @@ class AgentRunStoreTests(unittest.TestCase):
     def test_run_cannot_be_loaded_outside_its_scope(self) -> None:
         self.store.create(self.state)
 
-        self.assertIsNone(
-            self.store.load(self.state["run_id"], "another-user", "115r")
-        )
+        self.assertIsNone(self.store.load(self.state["run_id"], "another-user", "115r"))
         self.assertIsNone(self.store.load(self.state["run_id"], "user-1", "126a"))
 
     def test_steps_are_persisted_in_order(self) -> None:
         self.store.create(self.state)
         transition_agent_state(self.state, "planning")
         step_id = self.store.start_step(self.state, "planning", {"model": "mock"})
-        self.store.finish_step(step_id, status="succeeded", output_data={"route": "structured"})
+        self.store.finish_step(
+            step_id, status="succeeded", output_data={"route": "structured"}
+        )
 
         steps = AgentRunStore(self.database).list_steps(
             self.state["run_id"], "user-1", "115r"
@@ -317,7 +324,9 @@ class AgentRunStoreTests(unittest.TestCase):
             call for call in database.calls if "INSERT INTO agent_artifacts" in call[0]
         )
         citation_call = next(
-            call for call in database.calls if "INSERT INTO citation_evidence" in call[0]
+            call
+            for call in database.calls
+            if "INSERT INTO citation_evidence" in call[0]
         )
         self.assertEqual(artifact_call[1][1], state["run_id"])
         self.assertEqual(citation_call[1][1], state["run_id"])
@@ -468,6 +477,53 @@ class AgentRunStoreTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "unsupported observability event"):
             store.record_event(state, "model_private_reasoning")
+
+    def test_event_replay_uses_durable_sequence_cursor(self) -> None:
+        class RecordingDatabase:
+            def __init__(self) -> None:
+                self.query = ""
+                self.params: tuple[Any, ...] = ()
+
+            def fetch_all(
+                self, query: str, params: tuple[Any, ...] = ()
+            ) -> list[dict[str, Any]]:
+                self.query = " ".join(query.split())
+                self.params = params
+                return [
+                    {
+                        "sequence_id": 43,
+                        "event_id": "event-43",
+                        "run_id": "run-1",
+                        "event_type": "run_completed",
+                        "conversation_id": "conversation-1",
+                        "property_code": "115r",
+                        "step_id": None,
+                        "tool_name": None,
+                        "attempt": None,
+                        "duration_ms": 12,
+                        "timestamp": "2026-08-07T00:00:00",
+                        "error_type": None,
+                        "payload_json": '{"tool_calls": 1}',
+                    }
+                ]
+
+        database = RecordingDatabase()
+        events = AgentRunStore(database).list_events(
+            "run-1",
+            "user-1",
+            "conversation-1",
+            "115R",
+            after_sequence=42,
+        )
+
+        self.assertIn("events.sequence_id > %s", database.query)
+        self.assertIn("ORDER BY events.sequence_id", database.query)
+        self.assertEqual(
+            database.params,
+            ("run-1", "user-1", "conversation-1", "115r", 42),
+        )
+        self.assertEqual(events[0]["sequence_id"], 43)
+        self.assertEqual(events[0]["payload"], {"tool_calls": 1})
 
 
 if __name__ == "__main__":
