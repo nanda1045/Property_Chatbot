@@ -11,6 +11,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from copy import deepcopy
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 from uuid import uuid4
@@ -96,7 +97,7 @@ class ToolExecutor:
         *,
         idempotency_key: str | None = None,
     ) -> ToolResult:
-        invocation_id = f"tool_{uuid4()}"
+        invocation_id = str(uuid4())
         registered = self.registry.get(tool_name)
         if registered is None:
             return self._failure(
@@ -143,6 +144,28 @@ class ToolExecutor:
             if cached is not None:
                 cached_result = cached.model_copy(deep=True)
                 cached_result.cached = True
+                invocation_id = cached_result.invocation_id
+                self._emit(
+                    "tool_started",
+                    invocation_id=invocation_id,
+                    tool_name=tool_name,
+                    attempt=cached_result.attempt,
+                    sanitized_arguments=validated_input.model_dump(mode="json"),
+                    property_code=context.property_code,
+                    run_id=context.run_id,
+                    cached=True,
+                )
+                self._emit(
+                    "tool_succeeded",
+                    invocation_id=invocation_id,
+                    tool_name=tool_name,
+                    attempt=cached_result.attempt,
+                    duration_ms=0,
+                    property_code=context.property_code,
+                    run_id=context.run_id,
+                    cached=True,
+                    output_summary=self._output_summary(cached_result.data),
+                )
                 return cached_result
 
         if not self.budget.consume():
@@ -212,12 +235,16 @@ class ToolExecutor:
                         duration_ms=self._duration_ms(total_started),
                     )
 
+                completed_at = datetime.now(UTC).isoformat()
                 result = ToolResult(
                     invocation_id=invocation_id,
                     tool_name=spec.name,
                     status="succeeded",
                     attempt=attempt,
                     duration_ms=self._duration_ms(total_started),
+                    query_parameters=validated_input.model_dump(mode="json"),
+                    data_timestamp=self._data_timestamp(data),
+                    completed_at=completed_at,
                     data=data,
                 )
                 self._emit(
@@ -228,6 +255,8 @@ class ToolExecutor:
                     duration_ms=result.duration_ms,
                     property_code=context.property_code,
                     run_id=context.run_id,
+                    data_timestamp=result.data_timestamp,
+                    output_summary=self._output_summary(result.data),
                 )
                 return result
             except FutureTimeout:
@@ -268,6 +297,7 @@ class ToolExecutor:
                 invocation_id=invocation_id,
                 tool_name=spec.name,
                 attempt=attempt,
+                duration_ms=self._duration_ms(total_started),
                 retry_in_seconds=delay,
                 error_type=type(last_error).__name__,
                 property_code=context.property_code,
@@ -337,6 +367,7 @@ class ToolExecutor:
             status="failed",
             attempt=attempt,
             duration_ms=duration_ms,
+            completed_at=datetime.now(UTC).isoformat(),
             error=ToolError(
                 type=error_type,
                 message=message,
@@ -351,11 +382,19 @@ class ToolExecutor:
             attempt=attempt,
             duration_ms=duration_ms,
             error_type=error_type,
+            error_message=message,
+            error_details=details or {},
         )
         return result
 
     def _emit(self, event_type: str, **payload: Any) -> None:
-        self.trace_sink({"event": event_type, **payload})
+        self.trace_sink(
+            {
+                "event": event_type,
+                "timestamp": datetime.now(UTC).isoformat(),
+                **payload,
+            }
+        )
 
     @staticmethod
     def _log_trace(event: dict[str, Any]) -> None:
@@ -364,6 +403,34 @@ class ToolExecutor:
     @staticmethod
     def _duration_ms(started: float) -> int:
         return max(0, round((time.perf_counter() - started) * 1000))
+
+    @staticmethod
+    def _output_summary(data: Any) -> dict[str, Any]:
+        if isinstance(data, list):
+            return {"type": "list", "item_count": len(data)}
+        if isinstance(data, dict):
+            return {"type": "object", "keys": sorted(str(key) for key in data)[:30]}
+        return {"type": type(data).__name__}
+
+    @staticmethod
+    def _data_timestamp(data: Any) -> str | None:
+        """Return the newest source timestamp exposed by validated tool output."""
+        candidates: list[str] = []
+
+        def collect(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key in {"report_month", "scraped_at", "data_timestamp", "updated_at"}:
+                        if item is not None:
+                            candidates.append(str(item))
+                    elif isinstance(item, dict | list):
+                        collect(item)
+            elif isinstance(value, list):
+                for item in value:
+                    collect(item)
+
+        collect(data)
+        return max(candidates) if candidates else None
 
     def cached_results(self) -> dict[str, ToolResult]:
         with self._cache_lock:

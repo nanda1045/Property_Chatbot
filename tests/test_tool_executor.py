@@ -87,6 +87,9 @@ class ToolExecutorTests(unittest.TestCase):
 
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(result.data, {"doubled": 8})
+        self.assertEqual(result.query_parameters, {"value": 4})
+        self.assertIsNotNone(result.completed_at)
+        self.assertEqual(len(result.invocation_id), 36)
         self.assertEqual(captured["input"], {"value": 4})
         self.assertEqual(captured["property_code"], "115r")
 
@@ -145,6 +148,11 @@ class ToolExecutorTests(unittest.TestCase):
             [event["event"] for event in trace].count("tool_retried"),
             2,
         )
+        self.assertTrue(all("timestamp" in event for event in trace))
+        retry_events = [event for event in trace if event["event"] == "tool_retried"]
+        self.assertTrue(all(event["duration_ms"] >= 0 for event in retry_events))
+        succeeded = next(event for event in trace if event["event"] == "tool_succeeded")
+        self.assertEqual(succeeded["output_summary"], {"type": "object", "keys": ["doubled"]})
 
     def test_permanent_failure_does_not_retry(self) -> None:
         attempts = 0

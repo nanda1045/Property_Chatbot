@@ -17,6 +17,11 @@ from app.db.mysql import MySQLDatabase
 from app.memory.conversation_store import ConversationMemoryStore
 from app.schemas import (
     AgentApprovalRequest,
+    AgentRunCitation,
+    AgentRunDetail,
+    AgentRunEvent,
+    AgentRunScopeRequest,
+    AgentRunStep,
     ChatRequest,
     ChatResponse,
     SqlApprovalRequest,
@@ -188,6 +193,102 @@ def approve_agent_run(
     question = str(response.tool_results.get("question") or "custom SQL request")
     _record_approval_response(response, question, settings)
     return response
+
+
+@app.get("/api/agent-runs/{run_id}")
+def get_agent_run(
+    run_id: str,
+    property_code: str,
+    conversation_id: str,
+    settings: SettingsDep,
+) -> AgentRunDetail:
+    try:
+        detail = AgentRuntime(settings).get_run(
+            run_id=run_id,
+            property_code=property_code,
+            conversation_id=conversation_id,
+            user_id=settings.runtime_user_id,
+        )
+    except AgentRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return AgentRunDetail.model_validate(detail)
+
+
+@app.get("/api/agent-runs/{run_id}/steps")
+def get_agent_run_steps(
+    run_id: str,
+    property_code: str,
+    conversation_id: str,
+    settings: SettingsDep,
+) -> list[AgentRunStep]:
+    try:
+        steps = AgentRuntime(settings).list_run_steps(
+            run_id=run_id,
+            property_code=property_code,
+            conversation_id=conversation_id,
+            user_id=settings.runtime_user_id,
+        )
+    except AgentRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return [AgentRunStep.model_validate(step) for step in steps]
+
+
+@app.get("/api/agent-runs/{run_id}/events")
+def get_agent_run_events(
+    run_id: str,
+    property_code: str,
+    conversation_id: str,
+    settings: SettingsDep,
+) -> list[AgentRunEvent]:
+    try:
+        events = AgentRuntime(settings).list_run_events(
+            run_id=run_id,
+            property_code=property_code,
+            conversation_id=conversation_id,
+            user_id=settings.runtime_user_id,
+        )
+    except AgentRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return [AgentRunEvent.model_validate(event) for event in events]
+
+
+@app.get("/api/agent-runs/{run_id}/citations")
+def get_agent_run_citations(
+    run_id: str,
+    property_code: str,
+    conversation_id: str,
+    settings: SettingsDep,
+) -> list[AgentRunCitation]:
+    try:
+        citations = AgentRuntime(settings).list_run_citations(
+            run_id=run_id,
+            property_code=property_code,
+            conversation_id=conversation_id,
+            user_id=settings.runtime_user_id,
+        )
+    except AgentRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return [AgentRunCitation.model_validate(citation) for citation in citations]
+
+
+@app.post("/api/agent-runs/{run_id}/cancel")
+def cancel_agent_run(
+    run_id: str,
+    request: AgentRunScopeRequest,
+    settings: SettingsDep,
+) -> AgentRunDetail:
+    try:
+        detail = AgentRuntime(settings).cancel_run(
+            run_id=run_id,
+            property_code=request.property_code,
+            conversation_id=request.conversation_id,
+            user_id=settings.runtime_user_id,
+        )
+    except AgentRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except AgentRunConflictError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return AgentRunDetail.model_validate(detail)
 
 
 def _resolve_agent_approval(

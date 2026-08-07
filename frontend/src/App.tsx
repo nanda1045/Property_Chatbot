@@ -14,8 +14,22 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { ComponentRenderer } from "./components/ComponentRenderer";
-import { approveAgentRun, getModels, getProperties, sendChatStream } from "./lib/api";
-import type { ChatTurn, ModelOption, PropertyOption, UIComponent } from "./types";
+import { RunTracePanel } from "./components/RunTracePanel";
+import {
+  approveAgentRun,
+  cancelAgentRun,
+  getAgentRunTrace,
+  getModels,
+  getProperties,
+  sendChatStream
+} from "./lib/api";
+import type {
+  ChatResponse,
+  ChatTurn,
+  ModelOption,
+  PropertyOption,
+  UIComponent
+} from "./types";
 
 const STARTER_QUESTIONS = [
   "What is the latest occupancy and market rent?",
@@ -69,6 +83,7 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [loading, setLoading] = useState(false);
+  const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const turnListRef = useRef<HTMLDivElement>(null);
 
@@ -113,6 +128,49 @@ export default function App() {
     });
   }, [turns, loading]);
 
+  async function loadRunTrace(
+    turnId: string,
+    response: ChatResponse,
+    scopedConversationId: string
+  ) {
+    if (!response.run_id) {
+      return;
+    }
+    setTurns((current) =>
+      current.map((turn) =>
+        turn.id === turnId
+          ? { ...turn, traceLoading: true, traceError: undefined }
+          : turn
+      )
+    );
+    try {
+      const trace = await getAgentRunTrace({
+        runId: response.run_id,
+        propertyCode: response.property_code,
+        conversationId: scopedConversationId
+      });
+      setTurns((current) =>
+        current.map((turn) =>
+          turn.id === turnId
+            ? { ...turn, trace, traceLoading: false, traceError: undefined }
+            : turn
+        )
+      );
+    } catch (error) {
+      setTurns((current) =>
+        current.map((turn) =>
+          turn.id === turnId
+            ? {
+                ...turn,
+                traceLoading: false,
+                traceError: error instanceof Error ? error.message : "Unable to load run trace."
+              }
+            : turn
+        )
+      );
+    }
+  }
+
   async function submitQuestion(rawQuestion: string) {
     const question = rawQuestion.trim();
     if (!question || loading) {
@@ -153,6 +211,11 @@ export default function App() {
           turn.id === turnId ? { ...turn, response, streamedAnswer: undefined } : turn
         )
       );
+      void loadRunTrace(
+        turnId,
+        response,
+        response.conversation_id ?? conversationId
+      );
     } catch (error) {
       setTurns((current) =>
         current.map((turn) =>
@@ -166,6 +229,49 @@ export default function App() {
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleRunCancel(turnId: string) {
+    const turn = turns.find((candidate) => candidate.id === turnId);
+    const response = turn?.response;
+    if (!response?.run_id) {
+      return;
+    }
+    const scopedConversationId = response.conversation_id ?? conversationId;
+    setCancellingRunId(response.run_id);
+    try {
+      const run = await cancelAgentRun({
+        runId: response.run_id,
+        propertyCode: response.property_code,
+        conversationId: scopedConversationId
+      });
+      setTurns((current) =>
+        current.map((candidate) =>
+          candidate.id === turnId
+            ? {
+                ...candidate,
+                response: candidate.response
+                  ? { ...candidate.response, run_status: run.status }
+                  : candidate.response
+              }
+            : candidate
+        )
+      );
+      await loadRunTrace(turnId, response, scopedConversationId);
+    } catch (error) {
+      setTurns((current) =>
+        current.map((candidate) =>
+          candidate.id === turnId
+            ? {
+                ...candidate,
+                traceError: error instanceof Error ? error.message : "Unable to cancel run."
+              }
+            : candidate
+        )
+      );
+    } finally {
+      setCancellingRunId(null);
     }
   }
 
@@ -208,6 +314,11 @@ export default function App() {
               }
             : turn
         )
+      );
+      void loadRunTrace(
+        turnId,
+        response,
+        response.conversation_id ?? conversationId
       );
     } catch (error) {
       setTurns((current) =>
@@ -347,6 +458,15 @@ export default function App() {
                       {!turn.response ? <span className="stream-cursor" aria-hidden="true" /> : null}
                     </div>
 
+                    {turn.response && turn.response.citation_ids.length > 0 ? (
+                      <div className="answer-citations" aria-label="Answer evidence">
+                        <span>Evidence</span>
+                        {turn.response.citation_ids.map((citationId) => (
+                          <code key={citationId}>{citationId.slice(0, 8)}</code>
+                        ))}
+                      </div>
+                    ) : null}
+
                     {turn.response && turn.response.components.length > 0 ? (
                       <div className="component-grid">
                         {turn.response.components.map((component, index) => (
@@ -377,6 +497,16 @@ export default function App() {
                           </a>
                         ))}
                       </div>
+                    ) : null}
+
+                    {turn.response?.run_id ? (
+                      <RunTracePanel
+                        trace={turn.trace}
+                        loading={turn.traceLoading}
+                        error={turn.traceError}
+                        cancelling={cancellingRunId === turn.response.run_id}
+                        onCancel={() => void handleRunCancel(turn.id)}
+                      />
                     ) : null}
                   </div>
                 </div>

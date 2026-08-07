@@ -247,9 +247,11 @@ class ConversationMemoryStore:
         rows = self.database.fetch_all(
             f"""
             SELECT evidence.citation_id, evidence.run_id, evidence.source_type,
-                   evidence.source_name, evidence.document_id, evidence.chunk_id,
+                   evidence.source_name, evidence.tool_invocation_id,
+                   evidence.document_id, evidence.chunk_id,
                    evidence.content_hash, evidence.source_url,
-                   evidence.evidence_json, evidence.retrieved_at
+                   evidence.evidence_json, evidence.retrieved_at,
+                   evidence.index_version
             FROM citation_evidence AS evidence
             INNER JOIN agent_runs AS runs ON runs.run_id = evidence.run_id
             WHERE {" AND ".join(filters)}
@@ -258,5 +260,8 @@ class ConversationMemoryStore:
             tuple(params),
         )
         for row in rows:
-            row["evidence"] = _json_load(row.pop("evidence_json", None), None)
+            stored = _json_load(row.pop("evidence_json", None), {})
+            row["query_parameters"] = dict(stored.get("query_parameters") or {})
+            row["data_timestamp"] = stored.get("data_timestamp")
+            row["evidence"] = dict(stored.get("evidence") or stored)
         return rows

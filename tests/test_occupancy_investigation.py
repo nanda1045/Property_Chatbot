@@ -42,6 +42,9 @@ def tool_result(tool_name: str, data: Any, number: int) -> ToolResult:
         status="succeeded",
         attempt=1,
         duration_ms=number,
+        query_parameters={"request_number": number},
+        data_timestamp="2025-03-01",
+        completed_at="2026-08-06T12:00:00+00:00",
         data=data,
     )
 
@@ -137,6 +140,19 @@ class OccupancyInvestigationTests(unittest.TestCase):
         self.assertIn("does not prove", report.summary)
         self.assertIn("Executive Brief", markdown)
         self.assertTrue(any(item.source_type == "retrieval" for item in report.citations))
+        structured = next(
+            item for item in report.citations if item.source_type == "structured_tool"
+        )
+        retrieval_citation = next(
+            item for item in report.citations if item.source_type == "retrieval"
+        )
+        self.assertEqual(structured.query_parameters, {"request_number": 1})
+        self.assertEqual(structured.data_timestamp, "2025-03-01")
+        self.assertEqual(retrieval_citation.document_id, "doc-1")
+        self.assertEqual(
+            retrieval_citation.retrieved_at,
+            "2026-08-06T12:00:00+00:00",
+        )
 
     def test_no_decline_stops_without_unnecessary_downstream_calls(self) -> None:
         loop = BoundedAgentLoop(ExecutionLimits())
@@ -222,6 +238,16 @@ class OccupancyInvestigationTests(unittest.TestCase):
         retrieval_citation.evidence["metadata"]["property_code"] = "176r"
         with self.assertRaisesRegex(EvidenceVerificationError, "another property"):
             verify_occupancy_investigation_report(retrieval_scope, "115r")
+
+        missing_chunk = report.model_copy(deep=True)
+        retrieval_citation = next(
+            citation
+            for citation in missing_chunk.citations
+            if citation.source_type == "retrieval"
+        )
+        retrieval_citation.chunk_id = "unsupported-chunk"
+        with self.assertRaisesRegex(EvidenceVerificationError, "returned chunk"):
+            verify_occupancy_investigation_report(missing_chunk, "115r")
 
 
 if __name__ == "__main__":

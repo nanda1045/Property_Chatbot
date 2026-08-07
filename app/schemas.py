@@ -37,6 +37,78 @@ class AgentApprovalRequest(BaseModel):
     approved: bool = True
 
 
+class AgentRunScopeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    property_code: str = Field(min_length=1, max_length=32)
+    conversation_id: str = Field(min_length=1, max_length=128)
+
+
+class AgentRunDetail(BaseModel):
+    run_id: str
+    conversation_id: str
+    property_code: str
+    user_goal: str
+    status: str
+    current_step: int
+    max_steps: int
+    plan: list[dict[str, Any]] = Field(default_factory=list)
+    pending_approval: dict[str, Any] | None = None
+    tool_call_count: int
+    max_tool_calls: int
+    error: dict[str, Any] | None = None
+    final_answer: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class AgentRunStep(BaseModel):
+    step_id: str
+    run_id: str
+    step_number: int
+    step_type: str
+    status: str
+    input: dict[str, Any] | None = None
+    output: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    duration_ms: int | None = None
+
+
+class AgentRunEvent(BaseModel):
+    event_id: str
+    run_id: str
+    event_type: str
+    conversation_id: str
+    property_code: str
+    step_id: str | None = None
+    tool_name: str | None = None
+    attempt: int | None = None
+    duration_ms: int | None = None
+    timestamp: str
+    error_type: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentRunCitation(BaseModel):
+    citation_id: str
+    run_id: str
+    property_code: str
+    source_type: Literal["structured_tool", "retrieval"]
+    source_name: str
+    tool_invocation_id: str | None = None
+    query_parameters: dict[str, Any] = Field(default_factory=dict)
+    data_timestamp: str | None = None
+    document_id: str | None = None
+    chunk_id: str | None = None
+    content_hash: str
+    source_url: str | None = None
+    evidence: dict[str, Any]
+    retrieved_at: str
+    index_version: str | None = None
+
+
 class UIComponent(BaseModel):
     type: str
     title: str
@@ -73,11 +145,14 @@ class InvestigationCitation(BaseModel):
     source_type: Literal["structured_tool", "retrieval"]
     source_name: str
     tool_invocation_id: str
+    query_parameters: dict[str, Any] = Field(default_factory=dict)
+    data_timestamp: str | None = None
     document_id: str | None = None
     chunk_id: str | None = None
     source_url: str | None = None
     content_hash: str
     retrieved_at: str
+    index_version: str | None = None
     evidence: dict[str, Any]
 
 
@@ -118,5 +193,6 @@ class ChatResponse(BaseModel):
     answer_markdown: str
     components: list[UIComponent] = Field(default_factory=list)
     sources: list[Source] = Field(default_factory=list)
+    citation_ids: list[str] = Field(default_factory=list)
     tool_results: dict[str, Any] = Field(default_factory=dict)
     investigation: OccupancyInvestigationReport | None = None

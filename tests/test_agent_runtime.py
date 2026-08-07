@@ -15,6 +15,10 @@ class FakeWorkflow:
     def __init__(self, response: ChatResponse | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
         self.response = response
+        self.run_context: dict[str, Any] | None = None
+
+    def bind_run_context(self, **kwargs: Any) -> None:
+        self.run_context = kwargs
 
     def answer(self, **kwargs: Any) -> ChatResponse:
         self.calls.append(kwargs)
@@ -32,6 +36,7 @@ class RecordingRunStore:
         self.saved: list[AgentState] = []
         self.finished: list[dict[str, Any]] = []
         self.checkpoints: list[tuple[str, AgentState]] = []
+        self.events: list[dict[str, Any]] = []
 
     def create(self, state: AgentState) -> None:
         self.created = deepcopy(state)
@@ -45,6 +50,21 @@ class RecordingRunStore:
     def checkpoint(self, state: AgentState, transition_name: str) -> str:
         self.checkpoints.append((transition_name, deepcopy(state)))
         return f"checkpoint-{len(self.checkpoints)}"
+
+    def record_event(
+        self,
+        state: AgentState,
+        event_type: str,
+        **kwargs: Any,
+    ) -> str:
+        self.events.append(
+            {
+                "event_type": event_type,
+                "state": deepcopy(state),
+                **deepcopy(kwargs),
+            }
+        )
+        return f"event-{len(self.events)}"
 
     def load_latest_checkpoint(
         self,
@@ -62,6 +82,78 @@ class RecordingRunStore:
             ):
                 return deepcopy(state)
         return None
+
+    def load_scoped(
+        self,
+        run_id: str,
+        user_id: str,
+        conversation_id: str,
+        property_code: str,
+    ) -> AgentState | None:
+        state = self.current
+        if (
+            state is None
+            or state["run_id"] != run_id
+            or state["user_id"] != user_id
+            or state["conversation_id"] != conversation_id
+            or state["property_code"] != property_code
+        ):
+            return None
+        return deepcopy(state)
+
+    def get_run_detail(
+        self,
+        run_id: str,
+        user_id: str,
+        conversation_id: str,
+        property_code: str,
+    ) -> dict[str, Any] | None:
+        state = self.load_scoped(run_id, user_id, conversation_id, property_code)
+        if state is None:
+            return None
+        return {
+            "run_id": state["run_id"],
+            "conversation_id": state["conversation_id"],
+            "property_code": state["property_code"],
+            "user_goal": state["user_goal"],
+            "status": state["status"],
+            "current_step": state["current_step"],
+            "max_steps": state["max_steps"],
+            "plan": state["plan"],
+            "pending_approval": state["pending_approval"],
+            "tool_call_count": state["tool_call_count"],
+            "max_tool_calls": state["max_tool_calls"],
+            "error": state["error"],
+            "final_answer": state["final_answer"],
+            "created_at": "now",
+            "updated_at": "now",
+        }
+
+    def list_steps_scoped(self, *args: Any) -> list[dict[str, Any]]:
+        return []
+
+    def list_events(self, *args: Any) -> list[dict[str, Any]]:
+        return deepcopy(self.events)
+
+    def claim_cancellation(
+        self,
+        run_id: str,
+        user_id: str,
+        conversation_id: str,
+        property_code: str,
+    ) -> bool:
+        state = self.current
+        if (
+            state is None
+            or state["run_id"] != run_id
+            or state["user_id"] != user_id
+            or state["conversation_id"] != conversation_id
+            or state["property_code"] != property_code
+            or state["status"] in {"completed", "failed", "cancelled"}
+        ):
+            return False
+        state["status"] = "cancelled"
+        return True
 
     def claim_approval(self, run_id: str, user_id: str, property_code: str) -> bool:
         state = self.current
@@ -159,6 +251,17 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(loop_observation["steps"], 1)
         self.assertEqual(run_store.finished[0]["status"], "succeeded")
         self.assertEqual(
+            [event["event_type"] for event in run_store.events],
+            [
+                "run_created",
+                "planning_started",
+                "plan_created",
+                "step_started",
+                "verification_started",
+                "run_completed",
+            ],
+        )
+        self.assertEqual(
             [name for name, _ in run_store.checkpoints],
             [
                 "run_created",
@@ -207,6 +310,10 @@ class AgentRuntimeTests(unittest.TestCase):
             {"generated_sql", "structured_output"},
         )
         self.assertEqual(run_store.checkpoints[-1][0], "approval_requested")
+        self.assertIn(
+            "approval_requested",
+            [event["event_type"] for event in run_store.events],
+        )
 
     def test_investigation_report_is_scoped_to_run_and_persisted(self) -> None:
         response = ChatResponse(
@@ -270,6 +377,52 @@ class AgentRuntimeTests(unittest.TestCase):
             result.tool_results["occupancy_investigation"]["run_id"],
             result.run_id,
         )
+        self.assertEqual(result.citation_ids, ["citation-1"])
+
+    def test_general_tool_evidence_is_linked_to_the_answer(self) -> None:
+        class CitedWorkflow(FakeWorkflow):
+            @property
+            def citation_evidence(self) -> list[dict[str, Any]]:
+                return [
+                    {
+                        "citation_id": "citation-structured",
+                        "property_code": "115r",
+                        "source_type": "structured_tool",
+                        "source_name": "get_latest_property_kpis",
+                        "tool_invocation_id": "tool-1",
+                        "query_parameters": {},
+                        "data_timestamp": "2025-03-01",
+                        "content_hash": "a" * 64,
+                        "retrieved_at": "2026-08-06T00:00:00+00:00",
+                        "evidence": {"returned": {"occupancy": 91.0}},
+                    }
+                ]
+
+        workflow = CitedWorkflow(
+            ChatResponse(
+                property_code="115r",
+                model="mock:test",
+                answer_markdown="Occupancy is 91%.",
+            )
+        )
+        run_store = RecordingRunStore()
+        result = AgentRuntime(
+            Settings(_env_file=None),
+            workflow_factory=lambda _: workflow,
+            run_store_factory=lambda _: run_store,
+        ).answer(
+            property_code="115r",
+            message="Latest occupancy",
+            model="mock:test",
+            conversation_id="conversation-1",
+            user_id="user-1",
+        )
+
+        self.assertEqual(result.citation_ids, ["citation-structured"])
+        self.assertEqual(
+            run_store.saved[-1]["citations"][0]["tool_invocation_id"],
+            "tool-1",
+        )
 
     def test_workflow_failure_is_checkpointed(self) -> None:
         class FailingWorkflow(FakeWorkflow):
@@ -293,6 +446,8 @@ class AgentRuntimeTests(unittest.TestCase):
             )
 
         self.assertEqual(run_store.saved[-1]["status"], "failed")
+        self.assertEqual(run_store.events[-1]["event_type"], "run_failed")
+        self.assertEqual(run_store.events[-1]["error_type"], "TimeoutError")
         self.assertEqual(
             [name for name, _ in run_store.checkpoints][-2:],
             ["step_failed", "run_failed"],
@@ -373,6 +528,92 @@ class AgentRuntimeTests(unittest.TestCase):
                 user_id="user-1",
             )
         self.assertEqual(len(executor_calls), 1)
+
+    def test_tool_events_are_bound_to_the_current_run_and_step(self) -> None:
+        class ToolEventWorkflow(FakeWorkflow):
+            def answer(self, **kwargs: Any) -> ChatResponse:
+                assert self.run_context is not None
+                sink = self.run_context["event_sink"]
+                sink(
+                    {
+                        "event": "tool_started",
+                        "tool_name": "get_property_profile",
+                        "attempt": 1,
+                        "sanitized_arguments": {},
+                    }
+                )
+                sink(
+                    {
+                        "event": "tool_succeeded",
+                        "tool_name": "get_property_profile",
+                        "attempt": 1,
+                        "duration_ms": 4,
+                        "output_summary": {"type": "object"},
+                    }
+                )
+                return super().answer(**kwargs)
+
+        workflow = ToolEventWorkflow()
+        run_store = RecordingRunStore()
+        result = AgentRuntime(
+            Settings(_env_file=None),
+            workflow_factory=lambda _: workflow,
+            run_store_factory=lambda _: run_store,
+        ).answer(
+            property_code="115r",
+            message="Latest occupancy",
+            model="mock:test",
+            conversation_id="conversation-1",
+            user_id="user-1",
+        )
+
+        tool_events = [
+            event for event in run_store.events if event["event_type"].startswith("tool_")
+        ]
+        self.assertEqual(
+            [event["event_type"] for event in tool_events],
+            ["tool_started", "tool_succeeded"],
+        )
+        self.assertTrue(all(event["step_id"] == "step-1" for event in tool_events))
+        self.assertEqual(workflow.run_context["run_id"], result.run_id)
+
+    def test_waiting_run_can_be_cancelled_and_checkpointed(self) -> None:
+        response = ChatResponse(
+            property_code="115r",
+            model="mock:test",
+            answer_markdown="Review this SQL.",
+            components=[
+                {
+                    "type": "sql_approval",
+                    "title": "Review SQL",
+                    "data": {"sql": "SELECT 1", "status": "pending_approval"},
+                }
+            ],
+        )
+        run_store = RecordingRunStore()
+        runtime = AgentRuntime(
+            Settings(_env_file=None),
+            workflow_factory=lambda _: FakeWorkflow(response),
+            run_store_factory=lambda _: run_store,
+        )
+        waiting = runtime.answer(
+            property_code="115r",
+            message="Custom metric",
+            model="mock:test",
+            conversation_id="conversation-1",
+            user_id="user-1",
+        )
+
+        detail = runtime.cancel_run(
+            run_id=str(waiting.run_id),
+            property_code="115r",
+            conversation_id="conversation-1",
+            user_id="user-1",
+        )
+
+        self.assertEqual(detail["status"], "cancelled")
+        self.assertEqual(run_store.events[-1]["event_type"], "run_cancelled")
+        self.assertEqual(run_store.checkpoints[-1][0], "run_cancelled")
 
 
 class PropertyScopePolicyTests(unittest.TestCase):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -42,6 +43,73 @@ class RunStore(Protocol):
     def save(self, state: AgentState) -> None: ...
 
     def checkpoint(self, state: AgentState, transition_name: str) -> str: ...
+
+    def record_event(
+        self,
+        state: AgentState,
+        event_type: str,
+        **kwargs: Any,
+    ) -> str: ...
+
+    def load_scoped(
+        self,
+        run_id: str,
+        user_id: str,
+        conversation_id: str,
+        property_code: str,
+    ) -> AgentState | None: ...
+
+    def get_run_detail(
+        self,
+        run_id: str,
+        user_id: str,
+        conversation_id: str,
+        property_code: str,
+    ) -> dict[str, Any] | None: ...
+
+    def list_steps_scoped(
+        self,
+        run_id: str,
+        user_id: str,
+        conversation_id: str,
+        property_code: str,
+    ) -> list[dict[str, Any]]: ...
+
+    def list_events(
+        self,
+        run_id: str,
+        user_id: str,
+        conversation_id: str,
+        property_code: str,
+    ) -> list[dict[str, Any]]: ...
+
+    def list_citations_scoped(
+        self,
+        run_id: str,
+        user_id: str,
+        conversation_id: str,
+        property_code: str,
+    ) -> list[dict[str, Any]]: ...
+
+    def record_tool_invocation_event(
+        self,
+        state: AgentState,
+        step_id: str,
+        event_type: str,
+        tool_name: str,
+        attempt: int,
+        duration_ms: int | None,
+        error_type: str | None,
+        payload: dict[str, Any],
+    ) -> None: ...
+
+    def claim_cancellation(
+        self,
+        run_id: str,
+        user_id: str,
+        conversation_id: str,
+        property_code: str,
+    ) -> bool: ...
 
     def load_latest_checkpoint(
         self,
@@ -147,6 +215,7 @@ class AgentRuntime:
     ) -> ChatResponse:
         if not conversation_id:
             raise ValueError("conversation_id is required for durable agent execution")
+        run_started = perf_counter()
 
         state = new_agent_state(
             conversation_id=conversation_id,
@@ -158,8 +227,18 @@ class AgentRuntime:
         )
         run_store = self._run_store_factory(self.settings)
         run_store.create(state)
+        run_store.record_event(
+            state,
+            "run_created",
+            duration_ms=0,
+            payload={
+                "max_steps": state["max_steps"],
+                "max_tool_calls": state["max_tool_calls"],
+            },
+        )
         run_store.checkpoint(state, "run_created")
         transition_agent_state(state, "planning")
+        run_store.record_event(state, "planning_started")
         state["plan"] = [
             {
                 "step": 1,
@@ -169,6 +248,16 @@ class AgentRuntime:
             }
         ]
         run_store.save(state)
+        run_store.record_event(
+            state,
+            "plan_created",
+            payload={
+                "steps": [
+                    {"step": item["step"], "type": item["type"]}
+                    for item in state["plan"]
+                ]
+            },
+        )
         run_store.checkpoint(state, "plan_created")
 
         step_id: str | None = None
@@ -181,7 +270,25 @@ class AgentRuntime:
                 "property_chat_workflow",
                 {"property_code": state["property_code"], "model": model},
             )
+            run_store.record_event(
+                state,
+                "step_started",
+                step_id=step_id,
+                payload={"step_type": "property_chat_workflow", "model": model},
+            )
             run_store.checkpoint(state, "step_started")
+            bind_run_context = getattr(workflow, "bind_run_context", None)
+            if callable(bind_run_context):
+                bind_run_context(
+                    run_id=state["run_id"],
+                    conversation_id=state["conversation_id"],
+                    event_sink=lambda event: self._record_tool_event(
+                        run_store,
+                        state,
+                        step_id,
+                        event,
+                    ),
+                )
             response = workflow.answer(
                 property_code=property_code,
                 message=message,
@@ -200,6 +307,22 @@ class AgentRuntime:
                 response.tool_results["occupancy_investigation"] = (
                     response.investigation.model_dump(mode="json")
                 )
+                state["citations"] = [
+                    citation.model_dump(mode="json")
+                    for citation in response.investigation.citations
+                ]
+            else:
+                workflow_citations = list(
+                    getattr(workflow, "citation_evidence", []) or []
+                )
+                state["citations"] = workflow_citations or [
+                    source.model_dump(mode="json") for source in response.sources
+                ]
+            response.citation_ids = [
+                str(citation["citation_id"])
+                for citation in state["citations"]
+                if citation.get("citation_id")
+            ]
             structured_content = {
                 "tool_results": {
                     key: value
@@ -230,13 +353,6 @@ class AgentRuntime:
                     "component_types": [component.type for component in response.components],
                 }
             )
-            if response.investigation is not None:
-                state["citations"] = [
-                    citation.model_dump(mode="json")
-                    for citation in response.investigation.citations
-                ]
-            else:
-                state["citations"] = [source.model_dump() for source in response.sources]
             pending_component = next(
                 (
                     component
@@ -258,10 +374,27 @@ class AgentRuntime:
                 )
                 state["plan"][0]["status"] = "waiting_for_approval"
                 transition_agent_state(state, "waiting_for_approval")
+                run_store.record_event(
+                    state,
+                    "approval_requested",
+                    step_id=step_id,
+                    payload={"approval_type": "sql", "status": "pending"},
+                )
             else:
                 transition_agent_state(state, "verifying")
                 run_store.save(state)
+                run_store.record_event(
+                    state,
+                    "verification_started",
+                    step_id=step_id,
+                )
                 run_store.checkpoint(state, "verification_started")
+                if (
+                    response.investigation is not None
+                    and response.investigation.trace_summary.verification_status
+                    == "failed"
+                ):
+                    raise RuntimeError("investigation evidence verification failed")
                 state["final_answer"] = response.answer_markdown
                 state["plan"][0]["status"] = "completed"
                 transition_agent_state(state, "completed")
@@ -285,11 +418,23 @@ class AgentRuntime:
                 if state["status"] == "waiting_for_approval"
                 else "run_completed",
             )
+            if state["status"] == "completed":
+                run_store.record_event(
+                    state,
+                    "run_completed",
+                    step_id=step_id,
+                    duration_ms=self._duration_ms(run_started),
+                    payload={
+                        "steps": state["current_step"],
+                        "tool_calls": state["tool_call_count"],
+                    },
+                )
             response.run_status = state["status"]
             return response
         except Exception as error:
             error_data = {"type": type(error).__name__, "message": str(error)}
             if state["status"] not in TERMINAL_RUN_STATUSES:
+                verification_was_active = state["status"] == "verifying"
                 if "workflow" in locals():
                     self._capture_workflow_execution(state, workflow)
                 state["error"] = error_data
@@ -299,6 +444,22 @@ class AgentRuntime:
                     if step_id is not None:
                         run_store.finish_step(step_id, status="failed", error=error_data)
                     run_store.save(state)
+                    if verification_was_active:
+                        run_store.record_event(
+                            state,
+                            "verification_failed",
+                            step_id=step_id,
+                            error_type=error_data["type"],
+                            payload={"message": error_data["message"]},
+                        )
+                    run_store.record_event(
+                        state,
+                        "run_failed",
+                        step_id=step_id,
+                        duration_ms=self._duration_ms(run_started),
+                        error_type=error_data["type"],
+                        payload={"message": error_data["message"]},
+                    )
                     run_store.checkpoint(state, "step_failed")
                     run_store.checkpoint(state, "run_failed")
                 except Exception:
@@ -315,6 +476,7 @@ class AgentRuntime:
         user_id: str | None = None,
     ) -> ChatResponse:
         """Resume a checkpointed SQL run using only the backend-stored SQL draft."""
+        resumed_at = perf_counter()
         normalized_code = property_code.lower()
         trusted_user_id = user_id or self.settings.runtime_user_id
         run_store = self._run_store_factory(self.settings)
@@ -351,11 +513,25 @@ class AgentRuntime:
                 "timestamp": resolved_at,
             }
         )
+        run_store.record_event(
+            state,
+            "approval_received",
+            payload={
+                "approval_type": "sql",
+                "decision": "approved" if approved else "rejected",
+            },
+        )
 
         if not approved:
             state["plan"][0]["status"] = "cancelled"
             transition_agent_state(state, "cancelled")
             run_store.save(state)
+            run_store.record_event(
+                state,
+                "run_cancelled",
+                duration_ms=self._duration_ms(resumed_at),
+                payload={"reason": "sql_approval_rejected"},
+            )
             run_store.checkpoint(state, "approval_rejected")
             return ChatResponse(
                 property_code=normalized_code,
@@ -382,15 +558,52 @@ class AgentRuntime:
             "approved_sql_execution",
             {"property_code": normalized_code, "approval": "approved"},
         )
+        run_store.record_event(
+            state,
+            "step_started",
+            step_id=step_id,
+            payload={"step_type": "approved_sql_execution"},
+        )
         state["tool_call_count"] += 1
         run_store.save(state)
         run_store.checkpoint(state, "sql_execution_started")
 
         try:
-            validated_sql, rows = self._sql_executor(
-                self.settings,
-                pending["sql"],
-                normalized_code,
+            sql_started = perf_counter()
+            run_store.record_event(
+                state,
+                "tool_started",
+                step_id=step_id,
+                tool_name="execute_approved_sql",
+                attempt=1,
+                payload={"approval": "approved", "property_code": normalized_code},
+            )
+            try:
+                validated_sql, rows = self._sql_executor(
+                    self.settings,
+                    pending["sql"],
+                    normalized_code,
+                )
+            except Exception as sql_error:
+                run_store.record_event(
+                    state,
+                    "tool_failed",
+                    step_id=step_id,
+                    tool_name="execute_approved_sql",
+                    attempt=1,
+                    duration_ms=self._duration_ms(sql_started),
+                    error_type=type(sql_error).__name__,
+                    payload={"message": str(sql_error)},
+                )
+                raise
+            run_store.record_event(
+                state,
+                "tool_succeeded",
+                step_id=step_id,
+                tool_name="execute_approved_sql",
+                attempt=1,
+                duration_ms=self._duration_ms(sql_started),
+                payload={"output_summary": {"type": "rows", "row_count": len(rows)}},
             )
             state["artifacts"].append(
                 {
@@ -420,6 +633,11 @@ class AgentRuntime:
 
             transition_agent_state(state, "verifying")
             run_store.save(state)
+            run_store.record_event(
+                state,
+                "verification_started",
+                step_id=step_id,
+            )
             run_store.checkpoint(state, "verification_started")
             answer = (
                 "I ran the approved read-only query for the selected property. "
@@ -428,6 +646,16 @@ class AgentRuntime:
             state["final_answer"] = answer
             transition_agent_state(state, "completed")
             run_store.save(state)
+            run_store.record_event(
+                state,
+                "run_completed",
+                step_id=step_id,
+                duration_ms=self._duration_ms(resumed_at),
+                payload={
+                    "steps": state["current_step"],
+                    "tool_calls": state["tool_call_count"],
+                },
+            )
             run_store.checkpoint(state, "run_completed")
 
             return ChatResponse(
@@ -450,13 +678,213 @@ class AgentRuntime:
         except Exception as error:
             error_data = {"type": type(error).__name__, "message": str(error)}
             if state["status"] not in TERMINAL_RUN_STATUSES:
+                verification_was_active = state["status"] == "verifying"
                 state["error"] = error_data
                 state["plan"][-1]["status"] = "failed"
                 transition_agent_state(state, "failed")
                 try:
                     run_store.finish_step(step_id, status="failed", error=error_data)
                     run_store.save(state)
+                    if verification_was_active:
+                        run_store.record_event(
+                            state,
+                            "verification_failed",
+                            step_id=step_id,
+                            error_type=error_data["type"],
+                            payload={"message": error_data["message"]},
+                        )
+                    run_store.record_event(
+                        state,
+                        "run_failed",
+                        step_id=step_id,
+                        duration_ms=self._duration_ms(resumed_at),
+                        error_type=error_data["type"],
+                        payload={"message": error_data["message"]},
+                    )
                     run_store.checkpoint(state, "sql_execution_failed")
                 except Exception:
                     pass
             raise
+
+    def get_run(
+        self,
+        *,
+        run_id: str,
+        property_code: str,
+        conversation_id: str,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        store = self._run_store_factory(self.settings)
+        detail = store.get_run_detail(
+            run_id,
+            user_id or self.settings.runtime_user_id,
+            conversation_id,
+            property_code.lower(),
+        )
+        if detail is None:
+            raise AgentRunNotFoundError("agent run was not found")
+        return detail
+
+    def list_run_steps(
+        self,
+        *,
+        run_id: str,
+        property_code: str,
+        conversation_id: str,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        store = self._run_store_factory(self.settings)
+        if store.get_run_detail(
+            run_id,
+            user_id or self.settings.runtime_user_id,
+            conversation_id,
+            property_code.lower(),
+        ) is None:
+            raise AgentRunNotFoundError("agent run was not found")
+        return store.list_steps_scoped(
+            run_id,
+            user_id or self.settings.runtime_user_id,
+            conversation_id,
+            property_code.lower(),
+        )
+
+    def list_run_events(
+        self,
+        *,
+        run_id: str,
+        property_code: str,
+        conversation_id: str,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        store = self._run_store_factory(self.settings)
+        if store.get_run_detail(
+            run_id,
+            user_id or self.settings.runtime_user_id,
+            conversation_id,
+            property_code.lower(),
+        ) is None:
+            raise AgentRunNotFoundError("agent run was not found")
+        return store.list_events(
+            run_id,
+            user_id or self.settings.runtime_user_id,
+            conversation_id,
+            property_code.lower(),
+        )
+
+    def list_run_citations(
+        self,
+        *,
+        run_id: str,
+        property_code: str,
+        conversation_id: str,
+        user_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        store = self._run_store_factory(self.settings)
+        trusted_user_id = user_id or self.settings.runtime_user_id
+        normalized_code = property_code.lower()
+        if store.get_run_detail(
+            run_id,
+            trusted_user_id,
+            conversation_id,
+            normalized_code,
+        ) is None:
+            raise AgentRunNotFoundError("agent run was not found")
+        return store.list_citations_scoped(
+            run_id,
+            trusted_user_id,
+            conversation_id,
+            normalized_code,
+        )
+
+    def cancel_run(
+        self,
+        *,
+        run_id: str,
+        property_code: str,
+        conversation_id: str,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_code = property_code.lower()
+        trusted_user_id = user_id or self.settings.runtime_user_id
+        store = self._run_store_factory(self.settings)
+        state = store.load_scoped(
+            run_id,
+            trusted_user_id,
+            conversation_id,
+            normalized_code,
+        )
+        if state is None:
+            raise AgentRunNotFoundError("agent run was not found")
+        if state["status"] in TERMINAL_RUN_STATUSES:
+            raise AgentRunConflictError(f"run is already {state['status']}")
+        if not store.claim_cancellation(
+            run_id,
+            trusted_user_id,
+            conversation_id,
+            normalized_code,
+        ):
+            raise AgentRunConflictError("run could not be cancelled")
+
+        for plan_step in state["plan"]:
+            if plan_step.get("status") in {"pending", "running", "waiting_for_approval"}:
+                plan_step["status"] = "cancelled"
+        if state["pending_approval"] is not None:
+            state["pending_approval"]["status"] = "cancelled"
+            state["pending_approval"]["resolved_at"] = datetime.now(UTC).isoformat()
+        transition_agent_state(state, "cancelled")
+        store.save(state)
+        store.record_event(
+            state,
+            "run_cancelled",
+            payload={"reason": "user_requested"},
+        )
+        store.checkpoint(state, "run_cancelled")
+        detail = store.get_run_detail(
+            run_id,
+            trusted_user_id,
+            conversation_id,
+            normalized_code,
+        )
+        if detail is None:
+            raise AgentRunNotFoundError("agent run was not found")
+        return detail
+
+    @staticmethod
+    def _record_tool_event(
+        run_store: RunStore,
+        state: AgentState,
+        step_id: str,
+        event: dict[str, Any],
+    ) -> None:
+        payload = dict(event)
+        event_type = str(payload.pop("event", ""))
+        tool_name = payload.pop("tool_name", None)
+        attempt = payload.pop("attempt", None)
+        duration_ms = payload.pop("duration_ms", None)
+        error_type = payload.pop("error_type", None)
+        run_store.record_event(
+            state,
+            event_type,
+            step_id=step_id,
+            tool_name=str(tool_name) if tool_name is not None else None,
+            attempt=int(attempt) if attempt is not None else None,
+            duration_ms=int(duration_ms) if duration_ms is not None else None,
+            error_type=str(error_type) if error_type is not None else None,
+            payload=payload,
+        )
+        persist_invocation = getattr(run_store, "record_tool_invocation_event", None)
+        if callable(persist_invocation) and tool_name is not None:
+            persist_invocation(
+                state,
+                step_id,
+                event_type,
+                str(tool_name),
+                int(attempt) if attempt is not None else 0,
+                int(duration_ms) if duration_ms is not None else None,
+                str(error_type) if error_type is not None else None,
+                payload,
+            )
+
+    @staticmethod
+    def _duration_ms(started: float) -> int:
+        return max(0, round((perf_counter() - started) * 1000))

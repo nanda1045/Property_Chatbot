@@ -1,4 +1,13 @@
-import type { ChatResponse, ModelOption, PropertyOption } from "../types";
+import type {
+  AgentRunDetail,
+  AgentRunCitation,
+  AgentRunEvent,
+  AgentRunStep,
+  AgentRunTrace,
+  ChatResponse,
+  ModelOption,
+  PropertyOption
+} from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -74,6 +83,43 @@ export async function approveAgentRun(params: {
       property_code: params.propertyCode,
       conversation_id: params.conversationId,
       approved: true
+    })
+  });
+}
+
+function runScopeQuery(propertyCode: string, conversationId: string) {
+  return new URLSearchParams({
+    property_code: propertyCode,
+    conversation_id: conversationId
+  }).toString();
+}
+
+export async function getAgentRunTrace(params: {
+  runId: string;
+  propertyCode: string;
+  conversationId: string;
+}): Promise<AgentRunTrace> {
+  const runPath = `/api/agent-runs/${encodeURIComponent(params.runId)}`;
+  const query = runScopeQuery(params.propertyCode, params.conversationId);
+  const [run, steps, events, citations] = await Promise.all([
+    request<AgentRunDetail>(`${runPath}?${query}`),
+    request<AgentRunStep[]>(`${runPath}/steps?${query}`),
+    request<AgentRunEvent[]>(`${runPath}/events?${query}`),
+    request<AgentRunCitation[]>(`${runPath}/citations?${query}`)
+  ]);
+  return { run, steps, events, citations };
+}
+
+export async function cancelAgentRun(params: {
+  runId: string;
+  propertyCode: string;
+  conversationId: string;
+}): Promise<AgentRunDetail> {
+  return request(`/api/agent-runs/${encodeURIComponent(params.runId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify({
+      property_code: params.propertyCode,
+      conversation_id: params.conversationId
     })
   });
 }

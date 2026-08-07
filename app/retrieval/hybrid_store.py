@@ -169,7 +169,14 @@ class HybridPropertyRetriever:
             scores[result.id] = scores.get(result.id, 0.0) + self._rrf(rank)
 
         for rank, result in enumerate(keyword_results, start=1):
-            merged.setdefault(result.id, result)
+            existing = merged.get(result.id)
+            if existing is None:
+                merged[result.id] = result
+            else:
+                merged[result.id] = replace(
+                    existing,
+                    metadata={**result.metadata, **existing.metadata},
+                )
             keyword_ranks[result.id] = rank
             scores[result.id] = scores.get(result.id, 0.0) + self._rrf(rank)
 

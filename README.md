@@ -20,6 +20,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 - Bounded plan-execute-observe-decide loop with configurable run limits.
 - Adaptive occupancy-decline investigation with verified evidence and an executive brief.
 - Durable conversation turns, rolling summaries, run state, artifacts, and evidence.
+- Durable operational run events with scoped trace APIs, cancellation, and a Run Trace panel.
 - Safe SQL approval workflow for custom structured rent-roll questions not covered by predefined tools.
 - Golden dataset and evaluation scripts for retrieval and answer quality.
 
@@ -304,7 +305,7 @@ flowchart LR
 19. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
 20. Retrieved chunks are annotated with evidence confidence before being used in the answer.
 21. The API returns Markdown, sources, tool results, and structured UI component definitions.
-22. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, and source links.
+22. The React UI renders the Markdown and component payloads as chat messages, KPI cards, charts, tables, comparisons, SQL approval cards, source links, and an operational Run Trace panel.
 
 ### Agent Run Lifecycle
 
@@ -318,6 +319,50 @@ start/completion/failure, approval request/decision, SQL execution, verification
 terminal completion or failure. Approval uses an atomic database claim, so duplicate
 clicks cannot execute the same pending SQL twice. Checkpoint loading is scoped by the
 backend-owned user identity, conversation, and active property.
+
+### Runtime Observability
+
+The runtime persists ordered operational events for run creation, planning, steps, tool
+starts/successes/failures/retries, approvals, verification, cancellation, and terminal
+completion or failure. Events include run, conversation, property, step, tool, attempt,
+latency, timestamp, and structured error identifiers when applicable. Tool arguments and
+outputs are reduced to sanitized operational details; private model reasoning fields are
+removed before persistence.
+
+Run inspection requires the same conversation and property scope used to create the run:
+
+```bash
+curl "http://127.0.0.1:8000/api/agent-runs/RUN_ID?property_code=115r&conversation_id=CONVERSATION_ID"
+curl "http://127.0.0.1:8000/api/agent-runs/RUN_ID/steps?property_code=115r&conversation_id=CONVERSATION_ID"
+curl "http://127.0.0.1:8000/api/agent-runs/RUN_ID/events?property_code=115r&conversation_id=CONVERSATION_ID"
+curl "http://127.0.0.1:8000/api/agent-runs/RUN_ID/citations?property_code=115r&conversation_id=CONVERSATION_ID"
+```
+
+Cancel a nonterminal run with:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/agent-runs/RUN_ID/cancel \
+  -H "Content-Type: application/json" \
+  -d '{"property_code":"115r","conversation_id":"CONVERSATION_ID"}'
+```
+
+The frontend Run Trace panel shows planning, tool calls and retries, SQL approval,
+verification, final state, and latency per step. It exposes operational records only,
+never hidden chain-of-thought or private prompts.
+
+### Citation Traceability
+
+Successful structured and retrieval tool calls are normalized into stored citation
+evidence and linked to the answer by stable citation IDs. Structured citations retain
+the exact tool invocation, validated query parameters, source-data timestamp, and the
+relevant returned values. Retrieval citations retain the document and chunk IDs, source
+URL, content hash, retrieval timestamp, and index version when available.
+
+Citation persistence rejects duplicate IDs, unsupported tool-invocation links,
+cross-property evidence, altered content hashes, and retrieval records that do not match
+their returned chunk. Investigation findings additionally verify that every cited ID
+exists and every numerical metric occurs in its referenced structured evidence. The Run
+Trace panel exposes the scoped citation metadata and evidence behind each answer.
 
 ### Tool Execution Guarantees
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from typing import Any
 
@@ -69,12 +70,14 @@ class MemoryDatabase:
             )
             return 1
         if normalized.startswith("UPDATE agent_runs SET"):
-            run_id, user_id, property_code = params[-3:]
+            run_id, user_id, property_code, requested_status = params[-4:]
             row = self.runs.get(str(run_id))
             if not row or (row["user_id"], row["property_code"]) != (
                 user_id,
                 property_code,
             ):
+                return 0
+            if row["status"] == "cancelled" and requested_status != "cancelled":
                 return 0
             keys = [
                 "status",
@@ -261,7 +264,11 @@ class AgentRunStoreTests(unittest.TestCase):
                 self.calls.append((" ".join(query.split()), params))
                 return 1
 
-            def fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> None:
+            def fetch_one(
+                self, query: str, params: tuple[Any, ...] = ()
+            ) -> dict[str, Any] | None:
+                if "FROM tool_invocations AS invocations" in query:
+                    return {"invocation_id": "tool-1"}
                 return None
 
             def fetch_all(
@@ -287,11 +294,20 @@ class AgentRunStoreTests(unittest.TestCase):
         state["citations"] = [
             {
                 "citation_id": "citation-1",
-                "property_code": "untrusted-property",
+                "property_code": "115r",
                 "source_type": "retrieval",
                 "source_name": "Property website",
+                "tool_invocation_id": "tool-1",
+                "document_id": "document-1",
+                "chunk_id": "chunk-1",
                 "source_url": "https://example.com/property",
-                "evidence": {"text": "evidence"},
+                "retrieved_at": "2026-08-06T12:00:00+00:00",
+                "query_parameters": {"query": "amenities"},
+                "evidence": {
+                    "id": "chunk-1",
+                    "text": "evidence",
+                    "metadata": {"property_code": "115r"},
+                },
             }
         ]
 
@@ -306,6 +322,152 @@ class AgentRunStoreTests(unittest.TestCase):
         self.assertEqual(artifact_call[1][1], state["run_id"])
         self.assertEqual(citation_call[1][1], state["run_id"])
         self.assertEqual(citation_call[1][2], "115r")
+        self.assertEqual(citation_call[1][5], "tool-1")
+        self.assertEqual(
+            citation_call[1][11].isoformat(),
+            "2026-08-06T12:00:00",
+        )
+
+    def test_cross_property_citation_is_rejected(self) -> None:
+        class RecordingDatabase:
+            def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
+                return 1
+
+            def fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> None:
+                return None
+
+            def fetch_all(
+                self, query: str, params: tuple[Any, ...] = ()
+            ) -> list[dict[str, Any]]:
+                return []
+
+        state = new_agent_state(
+            conversation_id="conversation-1",
+            user_id="user-1",
+            property_code="115r",
+            user_goal="Create a report",
+        )
+        state["citations"] = [
+            {
+                "citation_id": "citation-1",
+                "property_code": "176r",
+                "source_type": "retrieval",
+                "source_name": "Property website",
+                "evidence": {"text": "wrong property"},
+            }
+        ]
+
+        with self.assertRaisesRegex(ValueError, "another property"):
+            AgentRunStore(RecordingDatabase()).save(state)
+
+    def test_tool_events_are_normalized_for_citation_linkage(self) -> None:
+        class RecordingDatabase:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+            def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
+                self.calls.append((" ".join(query.split()), params))
+                return 1
+
+            def fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> None:
+                return None
+
+            def fetch_all(
+                self, query: str, params: tuple[Any, ...] = ()
+            ) -> list[dict[str, Any]]:
+                return []
+
+        database = RecordingDatabase()
+        state = new_agent_state(
+            conversation_id="conversation-1",
+            user_id="user-1",
+            property_code="115r",
+            user_goal="Show occupancy",
+        )
+        AgentRunStore(database).record_tool_invocation_event(
+            state,
+            "step-1",
+            "tool_started",
+            "get_occupancy_trend",
+            1,
+            None,
+            None,
+            {
+                "invocation_id": "tool-1",
+                "sanitized_arguments": {"months": 12},
+            },
+        )
+
+        query, params = database.calls[0]
+        self.assertIn("INSERT INTO tool_invocations", query)
+        self.assertEqual(params[0], "tool-1")
+        self.assertEqual(json.loads(params[5]), {"months": 12})
+        self.assertEqual(params[-4:-1], ("user-1", "conversation-1", "115r"))
+
+    def test_operational_event_is_scoped_and_private_reasoning_is_removed(self) -> None:
+        class RecordingDatabase:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+            def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
+                self.calls.append((" ".join(query.split()), params))
+                return 1
+
+            def fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> None:
+                return None
+
+            def fetch_all(
+                self, query: str, params: tuple[Any, ...] = ()
+            ) -> list[dict[str, Any]]:
+                return []
+
+        database = RecordingDatabase()
+        store = AgentRunStore(database)
+        state = new_agent_state(
+            conversation_id="conversation-1",
+            user_id="user-1",
+            property_code="115r",
+            user_goal="Show occupancy",
+        )
+
+        store.record_event(
+            state,
+            "tool_started",
+            step_id="step-1",
+            tool_name="get_property_profile",
+            attempt=1,
+            payload={
+                "sanitized_arguments": {"limit": 5},
+                "reasoning": "must never be persisted",
+                "nested": {
+                    "chain_of_thought": "private",
+                    "systemPrompt": "private",
+                    "safe": "visible",
+                },
+            },
+        )
+
+        query, params = database.calls[0]
+        payload = json.loads(params[7])
+        self.assertIn("runs.user_id = %s", query)
+        self.assertEqual(
+            params[-6:],
+            (
+                state["run_id"],
+                "user-1",
+                "conversation-1",
+                "115r",
+                "step-1",
+                "step-1",
+            ),
+        )
+        self.assertNotIn("reasoning", payload)
+        self.assertNotIn("chain_of_thought", payload["nested"])
+        self.assertNotIn("systemPrompt", payload["nested"])
+        self.assertEqual(payload["nested"]["safe"], "visible")
+
+        with self.assertRaisesRegex(ValueError, "unsupported observability event"):
+            store.record_event(state, "model_private_reasoning")
 
 
 if __name__ == "__main__":

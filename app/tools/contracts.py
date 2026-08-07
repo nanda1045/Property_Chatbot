@@ -66,6 +66,9 @@ class ToolResult(BaseModel):
     status: ToolStatus
     attempt: int
     duration_ms: int
+    query_parameters: dict[str, Any] = Field(default_factory=dict)
+    data_timestamp: str | None = None
+    completed_at: str | None = None
     data: Any = None
     citation_refs: list[str] = Field(default_factory=list)
     error: ToolError | None = None

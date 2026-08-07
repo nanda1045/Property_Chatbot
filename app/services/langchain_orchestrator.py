@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
+from hashlib import sha256
 from typing import Any
 from urllib.parse import urlparse, urlunparse
+from uuid import NAMESPACE_URL, uuid5
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -44,7 +46,7 @@ from app.schemas import ChatResponse, Source, UIComponent
 from app.services.intent_router import get_intent_router
 from app.services.langchain_tools import build_langchain_tools
 from app.services.sql_approval import draft_sql_for_approval, validate_drafted_sql
-from app.tools.contracts import TrustedToolContext
+from app.tools.contracts import ToolResult, TrustedToolContext
 from app.tools.executor import ToolExecutor
 from app.tools.property_tools import build_property_tool_registry
 
@@ -253,9 +255,16 @@ WEBSITE_BOILERPLATE_PATTERNS = [
 class LangChainOrchestrator:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._run_id: str | None = None
+        self._conversation_id: str | None = None
+        self._operational_event_sink: Callable[[dict[str, Any]], None] | None = None
+        self._operational_events: list[dict[str, Any]] = []
+        self._property_code: str | None = None
+        self._tool_invocations: list[ToolResult] = []
         self.tool_executor = ToolExecutor(
             build_property_tool_registry(settings),
             max_tool_calls=settings.agent_max_tool_calls,
+            trace_sink=self._capture_tool_event,
         )
         self.tools = {
             tool.name: tool
@@ -264,6 +273,24 @@ class LangChainOrchestrator:
         self.intent_router = get_intent_router(settings)
         self._execution_loop: BoundedAgentLoop | None = None
         self._loop_result: AgentLoopResult | None = None
+
+    def bind_run_context(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        event_sink: Callable[[dict[str, Any]], None],
+    ) -> None:
+        """Attach backend-owned run scope and the durable operational event sink."""
+        self._run_id = run_id
+        self._conversation_id = conversation_id
+        self._operational_event_sink = event_sink
+
+    def _capture_tool_event(self, event: dict[str, Any]) -> None:
+        captured = dict(event)
+        self._operational_events.append(captured)
+        if self._operational_event_sink is not None:
+            self._operational_event_sink(captured)
 
     @property
     def tool_call_count(self) -> int:
@@ -304,6 +331,8 @@ class LangChainOrchestrator:
         on_token: Callable[[str], None] | None = None,
         history: list[dict[str, Any]] | None = None,
     ) -> ChatResponse:
+        self._operational_events = []
+        self._tool_invocations = []
         self.tool_executor.reset_execution()
         self._execution_loop = BoundedAgentLoop(
             ExecutionLimits(
@@ -316,6 +345,7 @@ class LangChainOrchestrator:
         )
         self._loop_result = None
         normalized_code = property_code.lower()
+        self._property_code = normalized_code
         tool_results: dict[str, Any] = {}
         components: list[UIComponent] = []
         sources: list[Source] = []
@@ -752,9 +782,11 @@ class LangChainOrchestrator:
                 TrustedToolContext(
                     property_code=property_code,
                     user_id=self.settings.runtime_user_id,
+                    run_id=self._run_id,
                 ),
             )
             invocations[action.key] = result
+            self._tool_invocations.append(result)
             if result.status == "failed":
                 error = result.error
                 raise RuntimeError(
@@ -2847,8 +2879,10 @@ class LangChainOrchestrator:
             TrustedToolContext(
                 property_code=property_code,
                 user_id=self.settings.runtime_user_id,
+                run_id=self._run_id,
             ),
         )
+        self._tool_invocations.append(result)
         if result.status == "failed":
             error = result.error
             raise RuntimeError(
@@ -2856,6 +2890,81 @@ class LangChainOrchestrator:
                 f"{error.message if error else 'Unknown tool failure.'}"
             )
         return result.data
+
+    @property
+    def citation_evidence(self) -> list[dict[str, Any]]:
+        """Normalize every successful tool result into property-scoped evidence."""
+        if self._property_code is None:
+            return []
+        citations: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for invocation in self._tool_invocations:
+            if invocation.status != "succeeded":
+                continue
+            evidence_items: list[tuple[str | None, dict[str, Any]]] = []
+            if invocation.tool_name == "search_property_content":
+                evidence_items.extend(
+                    (str(item.get("id") or "") or None, dict(item))
+                    for item in list(invocation.data or [])
+                )
+            else:
+                evidence_items.append((None, {"returned": invocation.data}))
+
+            for chunk_id, evidence in evidence_items:
+                metadata = dict(evidence.get("metadata") or {})
+                source_url = str(metadata.get("source_url") or "") or None
+                source_type = "retrieval" if chunk_id else "structured_tool"
+                citation_id = str(
+                    uuid5(
+                        NAMESPACE_URL,
+                        f"{self._run_id}:{invocation.invocation_id}:{chunk_id or 'structured'}",
+                    )
+                )
+                if citation_id in seen:
+                    continue
+                seen.add(citation_id)
+                serialized = json.dumps(
+                    evidence,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                )
+                citations.append(
+                    {
+                        "citation_id": citation_id,
+                        "property_code": self._property_code,
+                        "source_type": source_type,
+                        "source_name": invocation.tool_name,
+                        "tool_invocation_id": invocation.invocation_id,
+                        "query_parameters": invocation.query_parameters,
+                        "data_timestamp": (
+                            str(metadata.get("scraped_at") or "")
+                            or invocation.data_timestamp
+                        ),
+                        "document_id": (
+                            str(metadata.get("document_id") or "")
+                            or self._document_id(source_url)
+                        ),
+                        "chunk_id": chunk_id,
+                        "content_hash": sha256(serialized.encode("utf-8")).hexdigest(),
+                        "source_url": source_url,
+                        "retrieved_at": invocation.completed_at,
+                        "index_version": str(
+                            metadata.get("index_version")
+                            or metadata.get("scraped_at")
+                            or ""
+                        )
+                        or None,
+                        "evidence": evidence,
+                    }
+                )
+        return citations
+
+    @staticmethod
+    def _document_id(source_url: str | None) -> str | None:
+        if not source_url:
+            return None
+        return f"document-{sha256(source_url.encode('utf-8')).hexdigest()[:32]}"
 
     @staticmethod
     def _wants_reviews(text: str) -> bool:

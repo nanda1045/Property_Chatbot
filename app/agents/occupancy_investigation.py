@@ -227,8 +227,10 @@ def build_occupancy_investigation_report(
             source_type="structured_tool",
             source_name=tool_name,
             tool_invocation_id=invocation.invocation_id,
+            query_parameters=invocation.query_parameters,
+            data_timestamp=invocation.data_timestamp,
             evidence=evidence,
-            retrieved_at=retrieved_at,
+            retrieved_at=invocation.completed_at or retrieved_at,
         )
         citations.append(citation)
         citation_by_tool[tool_name] = citation
@@ -240,6 +242,7 @@ def build_occupancy_investigation_report(
     if retrieval_invocation:
         for result in retrieval[:3]:
             metadata = dict(result.get("metadata") or {})
+            source_url = str(metadata.get("source_url") or "") or None
             evidence = {
                 "id": result.get("id"),
                 "content": result.get("content"),
@@ -251,11 +254,22 @@ def build_occupancy_investigation_report(
                     source_type="retrieval",
                     source_name="search_property_content",
                     tool_invocation_id=retrieval_invocation.invocation_id,
-                    document_id=str(metadata.get("document_id") or "") or None,
+                    query_parameters=retrieval_invocation.query_parameters,
+                    data_timestamp=str(metadata.get("scraped_at") or "") or None,
+                    document_id=(
+                        str(metadata.get("document_id") or "")
+                        or _document_id(source_url)
+                    ),
                     chunk_id=str(result.get("id") or "") or None,
-                    source_url=str(metadata.get("source_url") or "") or None,
+                    source_url=source_url,
+                    index_version=str(
+                        metadata.get("index_version")
+                        or metadata.get("scraped_at")
+                        or ""
+                    )
+                    or None,
                     evidence=evidence,
-                    retrieved_at=retrieved_at,
+                    retrieved_at=retrieval_invocation.completed_at or retrieved_at,
                 )
             )
 
@@ -382,13 +396,33 @@ def verify_occupancy_investigation_report(
             raise EvidenceVerificationError("citation belongs to another property")
         if citation.source_type == "retrieval" and not citation.chunk_id:
             raise EvidenceVerificationError("retrieval citation is missing a chunk ID")
+        if not citation.tool_invocation_id:
+            raise EvidenceVerificationError("citation is missing its tool invocation")
         if citation.source_type == "retrieval":
             metadata = dict(citation.evidence.get("metadata") or {})
+            if str(citation.evidence.get("id") or "") != citation.chunk_id:
+                raise EvidenceVerificationError(
+                    "retrieval citation does not reference its returned chunk"
+                )
             evidence_property = str(metadata.get("property_code") or "").lower()
             if evidence_property != normalized_code:
                 raise EvidenceVerificationError(
                     "retrieval evidence belongs to another property"
                 )
+            evidence_url = str(metadata.get("source_url") or "") or None
+            if evidence_url != citation.source_url:
+                raise EvidenceVerificationError(
+                    "retrieval citation source does not match its chunk"
+                )
+        canonical = json.dumps(
+            citation.evidence,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        expected_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        if citation.content_hash != expected_hash:
+            raise EvidenceVerificationError("citation content hash does not match evidence")
 
     metric_count = 0
     for finding in report.findings:
@@ -548,26 +582,38 @@ def _citation(
     source_type: str,
     source_name: str,
     tool_invocation_id: str,
+    query_parameters: dict[str, Any],
+    data_timestamp: str | None,
     evidence: dict[str, Any],
     retrieved_at: str,
     document_id: str | None = None,
     chunk_id: str | None = None,
     source_url: str | None = None,
+    index_version: str | None = None,
 ) -> InvestigationCitation:
     serialized = json.dumps(evidence, sort_keys=True, separators=(",", ":"), default=str)
     return InvestigationCitation(
-        citation_id=f"citation_{uuid4()}",
+        citation_id=str(uuid4()),
         property_code=property_code.lower(),
         source_type=source_type,
         source_name=source_name,
         tool_invocation_id=tool_invocation_id,
+        query_parameters=query_parameters,
+        data_timestamp=data_timestamp,
         document_id=document_id,
         chunk_id=chunk_id,
         source_url=source_url,
         content_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
         retrieved_at=retrieved_at,
+        index_version=index_version,
         evidence=evidence,
     )
+
+
+def _document_id(source_url: str | None) -> str | None:
+    if not source_url:
+        return None
+    return f"document-{hashlib.sha256(source_url.encode('utf-8')).hexdigest()[:32]}"
 
 
 def _metric(

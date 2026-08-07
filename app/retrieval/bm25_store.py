@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -152,6 +153,10 @@ class BM25PropertyStore:
             "page_type": row["page_type"],
             "chunk_index": int(row["chunk_index"]),
             "scraped_at": row["scraped_at"],
+            "document_id": (
+                f"document-{sha256(str(row['source_url']).encode('utf-8')).hexdigest()[:32]}"
+            ),
+            "index_version": row["scraped_at"],
         }
         for key in [
             "address",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,10 @@ class PropertyChunk:
             "page_type": self.page_type,
             "chunk_index": self.chunk_index,
             "scraped_at": self.scraped_at,
+            "document_id": (
+                f"document-{sha256(self.source_url.encode('utf-8')).hexdigest()[:32]}"
+            ),
+            "index_version": self.scraped_at,
         }
         if self.section_heading:
             metadata["section_heading"] = self.section_heading
