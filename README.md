@@ -22,6 +22,8 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 - Durable conversation turns, rolling summaries, run state, artifacts, and evidence.
 - Durable operational run events with scoped trace APIs, cancellation, and a Run Trace panel.
 - Deterministic trajectory scoring and failure-injection reliability evaluations.
+- Readiness checks, structured JSON logs/errors, request IDs, and a rate-limit hook.
+- Reproducible backend container and GitHub Actions backend/frontend validation.
 - Safe SQL approval workflow for custom structured rent-roll questions not covered by predefined tools.
 - Golden dataset and evaluation scripts for retrieval and answer quality.
 
@@ -31,6 +33,7 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 app/agents/                  Agent runtime, workflow, planner, state, and policies
 app/memory/                  Durable conversation, run, artifact, and evidence stores
 app/tools/                   Typed contracts, registry, executor, and property tools
+app/core/                    Validated settings, structured logging/errors, HTTP policy hooks
 app/                         FastAPI backend, services, tools, retrieval clients
 frontend/                    React/Vite chatbot UI
 scripts/                     Data loading, scraping, ingestion, and eval runners
@@ -38,6 +41,8 @@ Data/                        Structured input/output data and retrieval indexes
 config/property_sources.json Property website source map
 evals/                       Golden datasets and evaluation reports
 sql/migrations/              Ordered MySQL agent-runtime migrations
+.github/workflows/ci.yml     Backend lint/tests and frontend build validation
+Dockerfile                   Reproducible FastAPI backend image
 ```
 
 ## Setup
@@ -46,7 +51,7 @@ Prerequisites:
 
 - Python 3.12+
 - `uv`
-- Node.js 20+
+- Node.js 20.19+ or 22.12+
 - Docker Desktop or Docker Engine
 
 ### Docker-First Local Setup
@@ -103,8 +108,10 @@ cp .env.example .env
 ```bash
 ANTHROPIC_API_KEY=...
 OPENAI_API_KEY=...
-GROQ_API_KEY=...
 ```
+
+`GROQ_API_KEY` is used only by the optional LLM-judge evaluation, not by the chat
+runtime.
 
 For the smoothest demo with Claude Haiku, set:
 
@@ -216,7 +223,84 @@ Health check:
 
 ```bash
 curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/ready
 ```
+
+`/health` is a process liveness check. `/ready` verifies that MySQL accepts a bounded
+readiness query and returns `503` when the dependency is unavailable.
+
+To run MySQL and the containerized backend together after the structured data has been
+loaded:
+
+```bash
+docker compose up --build mysql backend
+```
+
+The backend container applies pending migrations before starting. The local `Data/`
+directory is mounted for the existing retrieval indexes.
+
+### Local Command Reference
+
+From the repository root, the complete local workflow is:
+
+```bash
+# Install backend and frontend dependencies.
+uv sync
+cd frontend && npm ci && cd ..
+
+# Configure local settings on first setup, then add optional model API keys.
+test -f .env || cp .env.example .env
+
+# Start and initialize MySQL.
+docker compose up -d mysql
+uv run python scripts/load_rent_roll_mysql.py --reset
+uv run python scripts/run_migrations.py
+
+# Build retrieval data on first setup or after a refresh.
+uv run python scripts/scrape_property_sites.py
+uv run python scripts/ingest_unstructured.py --reset
+```
+
+Run the application in two terminals:
+
+```bash
+# Terminal 1: backend
+uv run aker-api
+
+# Terminal 2: frontend
+cd frontend
+npm run dev
+```
+
+Run deterministic validation without paid model calls:
+
+```bash
+uv run ruff check .
+uv run python -m unittest discover -s tests
+uv run python scripts/run_trajectory_evals.py \
+  --output-json /tmp/aker-trajectory-report.json
+uv run python scripts/run_golden_evals.py \
+  --output-json /tmp/aker-golden-report.json
+cd frontend && npm run build
+```
+
+The golden evaluation uses the local mock answer model and loaded property data. The
+separate LLM-judge command is optional and is the only evaluation path that needs a
+configured external model key.
+
+Important settings are validated when the backend imports its configuration:
+
+| Setting | Local default | Purpose |
+| --- | --- | --- |
+| `APP_ENV` | `local` | Selects `local`, `test`, `staging`, or `production` behavior |
+| `APP_HOST` / `APP_PORT` | `127.0.0.1` / `8000` | Backend bind address |
+| `APP_RELOAD` | `true` | Local reload; must be `false` in production |
+| `MYSQL_*` | See `.env.example` | Database connection and bounded connect timeout |
+| `DEFAULT_LLM_PROVIDER` / `DEFAULT_LLM_MODEL` | Anthropic / Claude Haiku | Default answer model |
+| `EMBEDDING_PROVIDER` | `sentence_transformer` | Local semantic embedding implementation |
+| `RUNTIME_USER_ID` | `local-user` | Trusted local user scope until authentication exists |
+| `AGENT_MAX_*` | See `.env.example` | Step, tool, retry, approval, and duration limits |
+| `STREAM_*` | See `.env.example` | SSE queue, polling, heartbeat, and cleanup bounds |
 
 ## API Examples
 
@@ -280,25 +364,40 @@ draft. SQL sent by the client is not accepted by this endpoint. The legacy
 The system is organized as a scoped retrieval and orchestration pipeline.
 
 ```mermaid
-flowchart LR
+flowchart TD
   User["User"] --> UI["React Chat UI"]
-  UI --> API["FastAPI"]
-  API --> Runtime["Agent Runtime"]
-  Runtime --> RunStore["Persistent Run Store"]
-  Runtime --> Workflow["Property Chat Workflow"]
-  Workflow --> Policies["Scope Policies"]
-  Workflow --> Planner["LLM Planner"]
-  Planner --> Loop["Bounded Agent Loop"]
+  UI --> API["FastAPI API + Request Policy"]
+  API --> Runtime["Durable Agent Runtime"]
+  Runtime --> Policies["Property and Safety Policies"]
+  Policies --> Planner["Structured Planner"]
+  Planner --> Loop["Bounded Plan-Execute-Observe Loop"]
   Loop --> Registry["Typed Tool Registry"]
-  Registry --> Executor["Bounded Tool Executor"]
-  Executor --> MySQL["MySQL (Rent-Roll)"]
-  Executor --> Retrieval["Website Retrieval"]
-  Workflow --> SQLApproval["SQL Draft + Approval"]
-  SQLApproval --> RunStore
-  Workflow --> LLM["LLM Answer"]
-  Workflow --> Response["Response + UI Components"]
+  Registry --> Executor["Tool Executor"]
+  Executor --> PropertyDB["MySQL Property Database"]
+  Executor --> Retrieval["BM25 + Chroma Retrieval"]
+  PropertyDB --> Evidence["Stored Tool Evidence"]
+  Retrieval --> Evidence
+  Evidence --> Loop
+  Loop --> Verification["Final Evidence Verification"]
+  Verification --> Citations["Stored Scoped Citations"]
+  Citations --> Response["Markdown + Typed UI Response"]
   Response --> UI
+
+  Runtime <--> Checkpoints["MySQL Run + Checkpoint Store"]
+  Loop --> Approval["SQL Approval Interrupt"]
+  Approval --> Checkpoints
+  UI -->|approve or reject| API
+  API -->|resume saved run| Approval
+
+  Runtime --> Events["Sanitized Operational Events"]
+  Events --> EventStream["SSE Replay + Run Trace API"]
+  EventStream --> UI
 ```
+
+The primary execution path is User → FastAPI → Agent Runtime → Planner → Tool
+Registry → Tool Executor → property database or retrieval → verification → citations.
+Checkpoint persistence, SQL approval, and observability are side channels around that
+path rather than model-controlled tools.
 
 1. The user selects a property in the React UI.
 2. The frontend sends `property_code`, selected `model`, and the user message to FastAPI.
@@ -325,16 +424,50 @@ flowchart LR
 
 ### Agent Run Lifecycle
 
-```text
-Created -> Planning -> Running -> Waiting for Approval
-        -> Running -> Verifying -> Completed
+```mermaid
+stateDiagram-v2
+  [*] --> Created
+  Created --> Planning
+  Planning --> Running
+  Running --> WaitingForApproval: SQL approval required
+  WaitingForApproval --> Running: approved and resumed
+  WaitingForApproval --> Cancelled: rejected or cancelled
+  Running --> Verifying: goal complete
+  Verifying --> Completed: evidence passed
+  Planning --> Failed: unrecoverable error
+  Running --> Failed: unrecoverable error
+  Verifying --> Failed: evidence failed
+  Created --> Cancelled: cancellation
+  Planning --> Cancelled: cancellation
+  Running --> Cancelled: cancellation
+  Completed --> [*]
+  Failed --> [*]
+  Cancelled --> [*]
 ```
+
+The successful approval path is **Created → Planning → Running → Waiting for Approval
+→ Running → Verifying → Completed**. Runs that do not need SQL approval move directly
+from Running to Verifying. Failed and Cancelled are terminal states alongside Completed.
 
 The runtime appends an immutable checkpoint after run creation, plan creation, step
 start/completion/failure, approval request/decision, SQL execution, verification, and
 terminal completion or failure. Approval uses an atomic database claim, so duplicate
 clicks cannot execute the same pending SQL twice. Checkpoint loading is scoped by the
 backend-owned user identity, conversation, and active property.
+
+### Reliability Guarantees
+
+| Guarantee | Enforcement |
+| --- | --- |
+| Property isolation | The backend injects the active property into tool scope, SQL parameters, retrieval metadata filters, memory keys, checkpoints, events, artifacts, and citation reads. Cross-property requests and evidence are rejected. |
+| Tool validation | Every registered tool has typed Pydantic input/output models, risk metadata, scope requirements, timeout, retry, idempotency, and output-size policy. The model cannot invent tools or trusted arguments. |
+| SQL safety | Generated SQL is read-only, allowlisted, property-parameterized, row-bounded where required, and paused for explicit approval. The server executes only its checkpointed draft. |
+| Retry policy | Only structured transient failures retry, using a fixed attempt bound with exponential backoff and jitter. Validation, policy, and permanent failures stop immediately. |
+| Idempotency | Identical idempotent reads reuse a per-run result without consuming another tool-call budget. SQL approval uses an atomic database claim to prevent duplicate execution. |
+| Execution limits | Configured step, tool-call, planner-retry, SQL-approval, total-duration, streaming-queue, and worker-backlog limits bound each run. Repeated identical actions are rejected. |
+| Checkpoint recovery | State is saved after important transitions. Approval resume reloads the latest user/conversation/property-scoped checkpoint, so process memory is not the source of truth. |
+| Citation verification | Numerical claims must exist in structured evidence; retrieval citations must resolve to stored chunks and hashes; citation IDs and property scope must match the run. |
+| Operational privacy | Traces contain sanitized tool and status records, never hidden chain-of-thought, private prompts, raw API keys, or SQL text in application logs. |
 
 ### Runtime Observability
 
@@ -365,6 +498,20 @@ curl -X POST http://127.0.0.1:8000/api/agent-runs/RUN_ID/cancel \
 The frontend Run Trace panel shows planning, tool calls and retries, SQL approval,
 verification, final state, and latency per step. It exposes operational records only,
 never hidden chain-of-thought or private prompts.
+
+### Operational API Contracts
+
+Every HTTP response includes an `X-Request-ID`; a valid caller-provided value is
+preserved for correlation. Application access, audit, readiness, and unexpected-error
+records are emitted as JSON without request bodies, SQL text, API keys, or private model
+reasoning. Error responses retain the `detail` field used by existing clients and add a
+stable `error.code`, `error.message`, and `request_id` envelope.
+
+Mutation endpoints call the replaceable rate-limit contract in
+`app/core/rate_limit.py`. Local development uses the allow-all implementation; a real
+deployment can assign a shared Redis or gateway-backed implementation to
+`app.state.rate_limiter` without changing route logic. SQL approval decisions are also
+stored as durable run events and emitted as sanitized audit logs.
 
 ### Citation Traceability
 
@@ -452,7 +599,20 @@ curl -s http://localhost:8000/chat \
   }'
 ```
 
-## Design Decisions
+## Engineering Decisions and Trade-offs
+
+These are the main interview-level design choices, including what each choice gives up:
+
+| Decision | Why | Trade-off |
+| --- | --- | --- |
+| Use a bounded agent instead of a fully autonomous loop | Fixed budgets, typed actions, deterministic stop rules, and evidence verification make execution explainable and testable. | New task families may require a policy, tool, or planner example instead of emerging automatically. |
+| Inject trusted scope server-side | Property, user, database, and approval scope cannot safely come from model output or client-supplied tool arguments. | The backend owns more orchestration code and every new trusted dimension must be threaded through contracts. |
+| Persist checkpoints | A run can survive process restart, pause for human approval, expose status after disconnect, and produce an audit trail. | Each transition performs additional database writes and state-schema evolution must remain backward compatible. |
+| Require human approval for generated SQL | Validation plus approval limits data access and makes custom analytics auditable. | Custom questions take an extra interaction and the intentionally strict validator can reject complex but valid SQL. |
+| Type tool inputs and outputs | Validation catches malformed model arguments and tool responses at a clear boundary before bad data reaches synthesis. | Tool schemas add maintenance work when repository outputs evolve. |
+| Retry transient failures only | Temporary database or network failures can recover without repeating permanent policy, validation, or malformed-output failures. | Error classification must be maintained carefully; an incorrectly classified failure may stop early or retry unnecessarily. |
+| Expose operational traces, not chain-of-thought | Run status, sanitized arguments, evidence, latency, and errors are enough to debug behavior without storing private reasoning. | Traces explain what executed and why at a policy level, but intentionally do not reveal hidden model deliberation. |
+| Retain the existing hybrid retrieval system | BM25 preserves exact property terms while Chroma handles paraphrases; reciprocal-rank fusion already works locally and has evaluation coverage. | The local stores are appropriate for this project scale, not a substitute for managed multi-tenant retrieval infrastructure. |
 
 MySQL was used for rent-roll data because the source files are structured and naturally relational. The schema separates property metadata, reports, summary groups, unit-level rows, and charge summaries. This makes analytical queries explicit, auditable, and property-scoped.
 
@@ -576,7 +736,7 @@ Evaluation coverage includes:
 - The user selects one active property at runtime, and answers should stay scoped to that property.
 
 
-## Tradeoffs
+## Additional Trade-offs
 
 - Chroma is simple to run locally and good for a prototype, but it is not a managed production vector database.
 - BM25 is stored locally with SQLite, which is lightweight but not designed for large multi-tenant search workloads.
@@ -607,5 +767,6 @@ Evaluation coverage includes:
 - Add richer semantic summarization and user-controlled conversation retention policies.
 - Add scheduled website re-scraping and index refresh jobs so retrieval content stays current.
 - Add stronger retrieval evaluation with larger golden datasets, human labels, and periodic LLM-judge scoring for faithfulness, answer relevance, and citation quality.
-- Add authentication, role-based access control, and audit logs before using the system with real users or sensitive property data.
+- Add authentication and role-based access control, then forward the existing approval
+  audit records to tamper-resistant centralized retention before using sensitive data.
 - Move Chroma/BM25 to production-ready managed retrieval infrastructure if the number of properties or users grows.

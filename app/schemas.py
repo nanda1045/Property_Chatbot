@@ -6,9 +6,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatRequest(BaseModel):
-    property_code: str = Field(description="Active property code, for example 115r.")
-    message: str
-    model: str = "anthropic:claude-haiku-4-5-20251001"
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    property_code: str = Field(
+        min_length=1,
+        max_length=32,
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="Active property code, for example 115r.",
+    )
+    message: str = Field(min_length=1, max_length=8000)
+    model: str = Field(default="anthropic:claude-haiku-4-5-20251001", max_length=128)
     conversation_id: str | None = Field(
         default=None,
         min_length=1,
@@ -18,14 +25,29 @@ class ChatRequest(BaseModel):
 
 
 class SqlApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     run_id: str | None = Field(
         default=None,
         description="Durable run to resume. Legacy requests may omit this field.",
     )
-    property_code: str = Field(description="Active property code, for example 115r.")
-    model: str = "anthropic:claude-haiku-4-5-20251001"
-    sql: str = Field(description="Backend-validated read-only SQL proposed for approval.")
-    question: str = Field(description="Original user question that produced the SQL proposal.")
+    property_code: str = Field(
+        min_length=1,
+        max_length=32,
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="Active property code, for example 115r.",
+    )
+    model: str = Field(default="anthropic:claude-haiku-4-5-20251001", max_length=128)
+    sql: str = Field(
+        min_length=1,
+        max_length=20000,
+        description="Backend-validated read-only SQL proposed for approval.",
+    )
+    question: str = Field(
+        min_length=1,
+        max_length=8000,
+        description="Original user question that produced the SQL proposal.",
+    )
     conversation_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 

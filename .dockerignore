@@ -1,0 +1,16 @@
+.git
+.github
+.env
+.venv
+.ruff_cache
+__pycache__
+*.pyc
+*.egg-info
+docs*
+frontend
+logs
+mysql-data
+tests
+Data/RentRoll_LeaseCharges_NamesRedacted copy
+Data/models
+Data/chroma

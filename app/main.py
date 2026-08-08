@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import queue
 from typing import Annotated
 from uuid import uuid4
@@ -14,6 +15,10 @@ from fastapi.responses import StreamingResponse
 from app.agents.cancellation import AgentRunCancelledError
 from app.agents.runtime import AgentRunConflictError, AgentRunNotFoundError, AgentRuntime
 from app.core.config import Settings, get_settings
+from app.core.errors import install_exception_handlers
+from app.core.http import RequestContextMiddleware
+from app.core.logging import configure_logging
+from app.core.rate_limit import AllowAllRateLimiter, enforce_rate_limit
 from app.db.mysql import MySQLDatabase
 from app.memory.conversation_store import ConversationMemoryStore
 from app.schemas import (
@@ -39,9 +44,13 @@ from app.services.run_stream import (
 from app.services.sql_approval import execute_approved_sql
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+RateLimitDep = Annotated[None, Depends(enforce_rate_limit)]
 
 _STREAM_WORKERS = BoundedStreamExecutor(max_workers=8, max_pending=8)
 _TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
+_BOOT_SETTINGS = get_settings()
+_LOGGER = configure_logging(_BOOT_SETTINGS.log_level)
+_AUDIT_LOGGER = logging.getLogger("aker.audit")
 
 
 app = FastAPI(
@@ -49,17 +58,17 @@ app = FastAPI(
     version="0.1.0",
     description="Property-scoped AI assistant prototype.",
 )
+app.state.rate_limiter = AllowAllRateLimiter()
+install_exception_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-    ],
+    allow_origins=_BOOT_SETTINGS.cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestContextMiddleware)
 
 
 @app.get("/health")
@@ -68,6 +77,29 @@ def health(settings: SettingsDep) -> dict[str, str]:
         "status": "ok",
         "env": settings.app_env,
         "default_property_code": settings.default_property_code,
+    }
+
+
+@app.get("/ready")
+def readiness(settings: SettingsDep) -> dict[str, object]:
+    """Report whether required backend dependencies can serve requests."""
+    try:
+        database_ready = MySQLDatabase(settings).ping()
+    except Exception as error:
+        _LOGGER.warning(
+            "readiness_check_failed",
+            extra={
+                "event": "readiness_check_failed",
+                "error_type": type(error).__name__,
+            },
+        )
+        raise HTTPException(status_code=503, detail="database is unavailable") from error
+    if not database_ready:
+        raise HTTPException(status_code=503, detail="database readiness check failed")
+    return {
+        "status": "ready",
+        "checks": {"database": "ok"},
+        "env": settings.app_env,
     }
 
 
@@ -102,7 +134,11 @@ def properties(settings: SettingsDep) -> dict[str, list[dict]]:
 
 
 @app.post("/chat")
-def chat(request: ChatRequest, settings: SettingsDep) -> ChatResponse:
+def chat(
+    request: ChatRequest,
+    settings: SettingsDep,
+    _rate_limit: RateLimitDep,
+) -> ChatResponse:
     conversation_id = request.conversation_id or str(uuid4())
     memory = _conversation_memory(settings)
     history = memory.get(
@@ -134,7 +170,11 @@ def chat(request: ChatRequest, settings: SettingsDep) -> ChatResponse:
 
 
 @app.post("/sql/execute")
-def execute_sql(request: SqlApprovalRequest, settings: SettingsDep) -> ChatResponse:
+def execute_sql(
+    request: SqlApprovalRequest,
+    settings: SettingsDep,
+    _rate_limit: RateLimitDep,
+) -> ChatResponse:
     if request.run_id:
         if not request.conversation_id:
             raise HTTPException(
@@ -153,6 +193,15 @@ def execute_sql(request: SqlApprovalRequest, settings: SettingsDep) -> ChatRespo
 
     normalized_code = request.property_code.lower()
     validated_sql, rows = execute_approved_sql(settings, request.sql, normalized_code)
+    _AUDIT_LOGGER.info(
+        "legacy_sql_approval_executed",
+        extra={
+            "event": "legacy_sql_approval_executed",
+            "conversation_id": request.conversation_id,
+            "property_code": normalized_code,
+            "decision": "approved",
+        },
+    )
     response = ChatResponse(
         property_code=normalized_code,
         model=request.model,
@@ -192,6 +241,7 @@ def approve_agent_run(
     run_id: str,
     request: AgentApprovalRequest,
     settings: SettingsDep,
+    _rate_limit: RateLimitDep,
 ) -> ChatResponse:
     response = _resolve_agent_approval(
         run_id=run_id,
@@ -377,6 +427,7 @@ def cancel_agent_run(
     run_id: str,
     request: AgentRunScopeRequest,
     settings: SettingsDep,
+    _rate_limit: RateLimitDep,
 ) -> AgentRunDetail:
     try:
         detail = AgentRuntime(settings).cancel_run(
@@ -402,7 +453,7 @@ def _resolve_agent_approval(
     settings: Settings,
 ) -> ChatResponse:
     try:
-        return AgentRuntime(settings).resolve_sql_approval(
+        response = AgentRuntime(settings).resolve_sql_approval(
             run_id=run_id,
             property_code=property_code,
             approved=approved,
@@ -413,6 +464,17 @@ def _resolve_agent_approval(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except AgentRunConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    _AUDIT_LOGGER.info(
+        "sql_approval_decision",
+        extra={
+            "event": "sql_approval_decision",
+            "run_id": run_id,
+            "conversation_id": conversation_id,
+            "property_code": property_code.lower(),
+            "decision": "approved" if approved else "rejected",
+        },
+    )
+    return response
 
 
 def _record_approval_response(
@@ -437,6 +499,7 @@ async def chat_stream(
     chat_request: ChatRequest,
     http_request: Request,
     settings: SettingsDep,
+    _rate_limit: RateLimitDep,
 ) -> StreamingResponse:
     conversation_id = chat_request.conversation_id or str(uuid4())
     run_id = str(uuid4())
@@ -478,7 +541,17 @@ async def chat_stream(
         except AgentRunCancelledError:
             pass
         except Exception as error:
-            buffer.publish("error", {"detail": str(error), "run_id": run_id})
+            _LOGGER.error(
+                "stream_run_failed",
+                extra={
+                    "event": "stream_run_failed",
+                    "run_id": run_id,
+                    "conversation_id": conversation_id,
+                    "property_code": chat_request.property_code.lower(),
+                    "error_type": type(error).__name__,
+                },
+            )
+            buffer.publish("error", {"detail": "agent run failed", "run_id": run_id})
         finally:
             buffer.close()
 
@@ -575,4 +648,12 @@ def _conversation_memory(settings: Settings) -> ConversationMemory:
 
 
 def run() -> None:
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
+    settings = get_settings()
+    configure_logging(settings.log_level)
+    uvicorn.run(
+        "app.main:app",
+        host=settings.app_host,
+        port=settings.app_port,
+        reload=settings.app_reload,
+        log_level=settings.log_level.lower(),
+    )

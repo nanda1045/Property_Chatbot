@@ -132,6 +132,35 @@ class StreamingApiTests(unittest.TestCase):
         self.assertFalse(active_run_cancellations.request(start["run_id"]))
         self.assertEqual(memory.add.call_args.kwargs["run_id"], start["run_id"])
 
+    def test_chat_stream_does_not_expose_internal_failure_details(self) -> None:
+        class FailingRuntime:
+            def __init__(self, settings) -> None:
+                pass
+
+            def answer(self, **kwargs) -> ChatResponse:
+                raise RuntimeError("private database and SQL details")
+
+        with (
+            patch("app.main.AgentRuntime", FailingRuntime),
+            patch("app.main._conversation_memory", return_value=MagicMock()),
+        ):
+            response = self.client.post(
+                "/chat/stream",
+                json={
+                    "property_code": "115r",
+                    "model": "mock:test",
+                    "message": "Hello",
+                    "conversation_id": "conversation-1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        error_event = next(
+            item for item in parse_sse(response.text) if item["event"] == "error"
+        )
+        self.assertEqual(json.loads(error_event["data"])["detail"], "agent run failed")
+        self.assertNotIn("private database", response.text)
+
     def test_run_event_stream_replays_only_missed_events(self) -> None:
         calls: list[dict] = []
 
@@ -234,6 +263,7 @@ class StreamingApiTests(unittest.TestCase):
                     stream_poll_interval_seconds=0.01,
                     stream_thread_join_seconds=1,
                 ),
+                None,
             )
             return [chunk async for chunk in response.body_iterator]
 

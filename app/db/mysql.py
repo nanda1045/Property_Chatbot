@@ -26,13 +26,7 @@ class MySQLDatabase:
         self.settings = settings
 
     def fetch_all(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-        connection = mysql.connector.connect(
-            host=self.settings.mysql_host,
-            port=self.settings.mysql_port,
-            user=self.settings.mysql_user,
-            password=self.settings.mysql_password,
-            database=self.settings.mysql_database,
-        )
+        connection = self._connect()
         try:
             cursor = connection.cursor(dictionary=True)
             try:
@@ -52,13 +46,7 @@ class MySQLDatabase:
 
     def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
         """Execute one write statement and return its affected-row count."""
-        connection = mysql.connector.connect(
-            host=self.settings.mysql_host,
-            port=self.settings.mysql_port,
-            user=self.settings.mysql_user,
-            password=self.settings.mysql_password,
-            database=self.settings.mysql_database,
-        )
+        connection = self._connect()
         try:
             cursor = connection.cursor()
             try:
@@ -72,3 +60,18 @@ class MySQLDatabase:
                 cursor.close()
         finally:
             connection.close()
+
+    def ping(self) -> bool:
+        """Return whether a short database readiness query succeeds."""
+        row = self.fetch_one("SELECT 1 AS ready")
+        return row is not None and int(row.get("ready", 0)) == 1
+
+    def _connect(self):
+        return mysql.connector.connect(
+            host=self.settings.mysql_host,
+            port=self.settings.mysql_port,
+            user=self.settings.mysql_user,
+            password=self.settings.mysql_password,
+            database=self.settings.mysql_database,
+            connection_timeout=self.settings.mysql_connect_timeout_seconds,
+        )

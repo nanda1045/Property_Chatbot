@@ -19,7 +19,6 @@ from xml.etree import ElementTree as ET
 
 import mysql.connector
 
-
 DATA_DIR = Path("Data/RentRoll_LeaseCharges_NamesRedacted copy")
 PROPERTY_SOURCES = Path("config/property_sources.json")
 SCHEMA_FILE = Path("sql/schema.sql")
@@ -69,7 +68,7 @@ class UnitRow:
     move_out_date: date | None
     balance: Decimal | None
     source_row_number: int
-    charges: list["ChargeRow"] = field(default_factory=list)
+    charges: list[ChargeRow] = field(default_factory=list)
 
 
 @dataclass
@@ -140,7 +139,13 @@ def read_sheet_rows(path: Path) -> list[dict[str, str]]:
             ref = cell.attrib.get("r", "")
             inline_text = cell.find("a:is/a:t", NS)
             value = cell.find("a:v", NS)
-            text = inline_text.text if inline_text is not None else value.text if value is not None else ""
+            text = (
+                inline_text.text
+                if inline_text is not None
+                else value.text
+                if value is not None
+                else ""
+            )
             values[cell_ref_to_col(ref)] = text or ""
             values["_row"] = str(row_number(ref) or values["_row"])
         rows.append(values)
@@ -366,7 +371,11 @@ def parse_rent_roll(path: Path) -> RentRollReport:
 
         if mode == "charge_summary":
             charge_code = clean_text(row.get("A"))
-            if not charge_code or charge_code.startswith("(") or charge_code.lower() == "charge code":
+            if (
+                not charge_code
+                or charge_code.startswith("(")
+                or charge_code.lower() == "charge code"
+            ):
                 continue
             if charge_code.lower() == "total":
                 continue
@@ -409,7 +418,12 @@ def values_tuple(values: list[Any]) -> str:
     return "(" + ", ".join(sql_literal(value) for value in values) + ")"
 
 
-def batched_insert(table: str, columns: list[str], rows: list[list[Any]], batch_size: int = 500) -> list[str]:
+def batched_insert(
+    table: str,
+    columns: list[str],
+    rows: list[list[Any]],
+    batch_size: int = 500,
+) -> list[str]:
     statements = []
     if not rows:
         return statements
@@ -447,7 +461,8 @@ def generate_sql(
 ) -> str:
     schema_sql = SCHEMA_FILE.read_text(encoding="utf-8")
     lines = [
-        f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;",
+        f"CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 "
+        "COLLATE utf8mb4_unicode_ci;",
         f"USE `{database}`;",
         "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;",
     ]
@@ -515,7 +530,10 @@ def generate_sql(
         )
     )
 
-    lines.append("CREATE TEMPORARY TABLE tmp_report_ids AS SELECT id, source_file_hash FROM rent_roll_reports;")
+    lines.append(
+        "CREATE TEMPORARY TABLE tmp_report_ids AS "
+        "SELECT id, source_file_hash FROM rent_roll_reports;"
+    )
 
     unit_rows = []
     for report in reports:
@@ -874,9 +892,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--user", default=os.environ.get("MYSQL_USER", "root"))
     parser.add_argument("--password", default=os.environ.get("MYSQL_PASSWORD", "root"))
     parser.add_argument("--codes", nargs="*", help="Optional property codes to load.")
-    parser.add_argument("--reset", action="store_true", help="Drop and recreate the structured tables first.")
-    parser.add_argument("--dry-run", action="store_true", help="Parse files and print counts without loading MySQL.")
-    parser.add_argument("--write-sql", help="Write generated SQL to this path instead of, or before, loading.")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Drop and recreate the structured tables first.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Parse files and print counts without loading MySQL.",
+    )
+    parser.add_argument(
+        "--write-sql",
+        help="Write generated SQL to this path instead of, or before, loading.",
+    )
     return parser.parse_args()
 
 

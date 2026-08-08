@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-import re
 
 from app.core.config import Settings
 from app.retrieval.embeddings import LocalHashEmbedder, TextEmbedder, build_embedder
@@ -329,15 +329,31 @@ class IntentRouter:
 
         has_vacancy_term = any(term in tokens for term in ["open", "vacant", "vacancy"])
         has_unit_or_layout = any(
-            term in tokens for term in ["apartment", "apartments", "unit", "units", "layouts", "layout"]
+            term in tokens
+            for term in [
+                "apartment",
+                "apartments",
+                "unit",
+                "units",
+                "layouts",
+                "layout",
+            ]
         )
         if (has_vacancy_term and has_unit_or_layout) or (
-            "available" in tokens and any(term in tokens for term in ["apartment", "apartments", "unit", "units"])
+            "available" in tokens
+            and any(
+                term in tokens
+                for term in ["apartment", "apartments", "unit", "units"]
+            )
         ):
             return IntentRoute("vacant_units", 1.0, reason="rule")
 
-        if any(term in tokens for term in ["bucket", "buckets", "category", "categories", "mix"]) and any(
-            term in tokens for term in ["charge", "charges", "fee", "fees", "income", "revenue"]
+        if any(
+            term in tokens
+            for term in ["bucket", "buckets", "category", "categories", "mix"]
+        ) and any(
+            term in tokens
+            for term in ["charge", "charges", "fee", "fees", "income", "revenue"]
         ):
             return IntentRoute("charge_breakdown", 1.0, reason="rule")
 
