@@ -22,18 +22,23 @@ type RunTracePanelProps = {
 };
 
 const EVENT_LABELS: Record<string, string> = {
-  run_created: "Run created",
+  run_created: "Run checkpoint created",
+  AUTHENTICATED: "Request authenticated",
+  AUTHORIZATION_ALLOWED: "Authorization allowed",
+  AUTHORIZATION_DENIED: "Authorization denied",
+  SQL_APPROVAL_AUTHORIZED: "SQL approval authorization allowed",
+  SQL_APPROVAL_DENIED: "SQL approval authorization denied",
   planning_started: "Planning started",
   plan_created: "Plan created",
-  step_started: "Step started",
-  tool_started: "Tool started",
-  tool_succeeded: "Tool succeeded",
-  tool_failed: "Tool failed",
-  tool_retried: "Tool retried",
-  approval_requested: "SQL approval requested",
-  approval_received: "SQL approval received",
-  verification_started: "Verification started",
-  verification_failed: "Verification failed",
+  step_started: "Execution step started",
+  tool_started: "Tool requested",
+  tool_succeeded: "Tool execution completed",
+  tool_failed: "Tool execution failed",
+  tool_retried: "Tool execution retried",
+  approval_requested: "SQL approval required",
+  approval_received: "SQL approval decision received",
+  verification_started: "Evidence verification started",
+  verification_failed: "Evidence verification failed",
   run_completed: "Run completed",
   run_failed: "Run failed",
   run_cancelled: "Run cancelled"
@@ -52,41 +57,133 @@ function formatDuration(duration?: number | null) {
 }
 
 function eventIcon(event: AgentRunEvent) {
-  if (event.event_type === "tool_retried") {
+  const eventType = event.event_type.toLowerCase();
+  if (eventType === "tool_retried") {
     return <RotateCw aria-hidden="true" />;
   }
-  if (event.event_type.includes("approval")) {
+  if (eventType.includes("authorization") || eventType.includes("authenticated")) {
     return <ShieldCheck aria-hidden="true" />;
   }
-  if (event.event_type.includes("verification")) {
+  if (eventType.includes("approval")) {
+    return <ShieldCheck aria-hidden="true" />;
+  }
+  if (eventType.includes("verification")) {
     return <DatabaseZap aria-hidden="true" />;
   }
-  if (event.event_type.endsWith("failed")) {
+  if (eventType.endsWith("failed") || eventType.endsWith("denied")) {
     return <XCircle aria-hidden="true" />;
   }
-  if (event.event_type === "run_cancelled") {
+  if (eventType === "run_cancelled") {
     return <Ban aria-hidden="true" />;
   }
-  if (event.event_type.endsWith("completed") || event.event_type.endsWith("succeeded")) {
+  if (
+    eventType.endsWith("completed") ||
+    eventType.endsWith("succeeded") ||
+    eventType.endsWith("allowed")
+  ) {
     return <CheckCircle2 aria-hidden="true" />;
   }
   return <Activity aria-hidden="true" />;
 }
 
 function eventTone(event: AgentRunEvent) {
-  if (event.event_type.endsWith("failed")) {
+  const eventType = event.event_type.toLowerCase();
+  if (eventType.endsWith("failed") || eventType.endsWith("denied")) {
     return "failed";
   }
-  if (event.event_type === "run_cancelled") {
+  if (eventType === "run_cancelled") {
     return "cancelled";
   }
-  if (event.event_type === "tool_retried") {
+  if (eventType === "tool_retried") {
     return "retried";
   }
-  if (event.event_type.endsWith("completed") || event.event_type.endsWith("succeeded")) {
+  if (
+    eventType.endsWith("completed") ||
+    eventType.endsWith("succeeded") ||
+    eventType.endsWith("allowed") ||
+    eventType === "authenticated"
+  ) {
     return "succeeded";
   }
   return "active";
+}
+
+function eventLabel(event: AgentRunEvent) {
+  if (event.event_type === "approval_received") {
+    const decision = event.payload.decision;
+    if (decision === "approved") {
+      return "User approved SQL";
+    }
+    if (decision === "rejected") {
+      return "User rejected SQL";
+    }
+  }
+  if (event.tool_name === "execute_approved_sql") {
+    if (event.event_type === "tool_started") {
+      return "Approved SQL execution started";
+    }
+    if (event.event_type === "tool_succeeded") {
+      return "Approved SQL execution completed";
+    }
+    if (event.event_type === "tool_failed") {
+      return "Approved SQL execution failed";
+    }
+  }
+  return EVENT_LABELS[event.event_type] ?? event.event_type.replaceAll("_", " ");
+}
+
+function eventCategory(event: AgentRunEvent) {
+  const eventType = event.event_type.toLowerCase();
+  if (eventType.includes("auth")) {
+    return "Security";
+  }
+  if (eventType.includes("approval")) {
+    return "Human approval";
+  }
+  if (eventType.includes("tool") || event.tool_name) {
+    return event.tool_name === "execute_approved_sql" ? "SQL execution" : "Tool execution";
+  }
+  if (eventType.includes("planning") || eventType.includes("plan_")) {
+    return "Planning";
+  }
+  if (eventType.includes("verification")) {
+    return "Verification";
+  }
+  if (eventType.startsWith("run_")) {
+    return "Run lifecycle";
+  }
+  return "Execution";
+}
+
+function safeEventMetadata(event: AgentRunEvent) {
+  const entries: Array<[string, string]> = [["Property", event.property_code.toUpperCase()]];
+  const scalarFields: Array<[string, string]> = [
+    ["Permission", "permission"],
+    ["Decision", "decision"],
+    ["Outcome", "outcome"],
+    ["Role", "role"],
+    ["Status", "status"],
+    ["Step", "step_type"],
+    ["Reason", "reason"]
+  ];
+
+  for (const [label, key] of scalarFields) {
+    const value = event.payload[key];
+    if (typeof value === "string" && value.trim()) {
+      entries.push([label, value.replaceAll("_", " ")]);
+    }
+  }
+
+  const outputSummary = event.payload.output_summary;
+  if (outputSummary && typeof outputSummary === "object" && !Array.isArray(outputSummary)) {
+    const summary = outputSummary as Record<string, unknown>;
+    const count = summary.row_count ?? summary.item_count;
+    if (typeof count === "number") {
+      entries.push(["Records", String(count)]);
+    }
+  }
+
+  return entries;
 }
 
 export function RunTracePanel({
@@ -141,6 +238,10 @@ export function RunTracePanel({
               {trace.run.tool_call_count}/{trace.run.max_tool_calls}
             </strong>
           </div>
+          <div>
+            <span>Property</span>
+            <strong>{trace.run.property_code.toUpperCase()}</strong>
+          </div>
           {canCancel ? (
             <button type="button" className="trace-cancel" onClick={onCancel} disabled={cancelling}>
               <Ban aria-hidden="true" />
@@ -172,11 +273,15 @@ export function RunTracePanel({
               {trace.citations.map((citation) => (
                 <details key={citation.citation_id} className="trace-citation">
                   <summary>
-                    <span>{citation.source_type.replaceAll("_", " ")}</span>
+                    <span>Evidence recorded</span>
                     <strong>{citation.source_name}</strong>
                     <code>{citation.citation_id.slice(0, 8)}</code>
                   </summary>
                   <dl>
+                    <dt>Evidence type</dt>
+                    <dd>{citation.source_type.replaceAll("_", " ")}</dd>
+                    <dt>Property</dt>
+                    <dd>{citation.property_code.toUpperCase()}</dd>
                     {citation.tool_invocation_id ? (
                       <>
                         <dt>Tool invocation</dt>
@@ -217,13 +322,6 @@ export function RunTracePanel({
                       Open source
                     </a>
                   ) : null}
-                  <details className="trace-details">
-                    <summary>Query and evidence</summary>
-                    <pre>{JSON.stringify({
-                      query_parameters: citation.query_parameters,
-                      evidence: citation.evidence
-                    }, null, 2)}</pre>
-                  </details>
                 </details>
               ))}
             </div>
@@ -236,7 +334,10 @@ export function RunTracePanel({
               <span className="trace-event-icon">{eventIcon(event)}</span>
               <div>
                 <div className="trace-event-heading">
-                  <strong>{EVENT_LABELS[event.event_type] ?? event.event_type}</strong>
+                  <div>
+                    <span className="trace-event-category">{eventCategory(event)}</span>
+                    <strong>{eventLabel(event)}</strong>
+                  </div>
                   {event.duration_ms !== null && event.duration_ms !== undefined ? (
                     <time>{formatDuration(event.duration_ms)}</time>
                   ) : null}
@@ -246,12 +347,14 @@ export function RunTracePanel({
                   {event.attempt ? <span>attempt {event.attempt}</span> : null}
                   {event.error_type ? <span>{event.error_type}</span> : null}
                 </p>
-                {Object.keys(event.payload).length > 0 ? (
-                  <details className="trace-details">
-                    <summary>Operational details</summary>
-                    <pre>{JSON.stringify(event.payload, null, 2)}</pre>
-                  </details>
-                ) : null}
+                <dl className="trace-metadata">
+                  {safeEventMetadata(event).map(([label, value]) => (
+                    <div key={`${label}-${value}`}>
+                      <dt>{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
               </div>
             </li>
           ))}

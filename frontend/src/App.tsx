@@ -3,14 +3,21 @@ import type { AnchorHTMLAttributes, FormEvent, KeyboardEvent } from "react";
 import {
   Bot,
   Building2,
+  CheckCircle2,
   ExternalLink,
+  GitPullRequestArrow,
+  Info,
+  LockKeyhole,
   Loader2,
   LogIn,
   LogOut,
   MapPin,
   MessageSquareText,
   Send,
-  Sparkles
+  ShieldCheck,
+  Sparkles,
+  Workflow,
+  X
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -34,11 +41,24 @@ import type {
   UIComponent
 } from "./types";
 
-const STARTER_QUESTIONS = [
-  "What is the latest occupancy and market rent?",
-  "Does this property have EV charging?",
-  "Show me the occupancy trend over time.",
-  "Which units have the highest balances?"
+const STARTER_WORKFLOWS = [
+  {
+    label: "Retrieval",
+    question: "What amenities are available at this property?"
+  },
+  {
+    label: "Structured analytics",
+    question: "Show the occupancy trend and explain any recent decline."
+  },
+  {
+    label: "Hybrid investigation",
+    question:
+      "Investigate why occupancy declined and give me an executive summary with supporting evidence."
+  },
+  {
+    label: "Privileged action",
+    question: "Calculate a custom rent-roll metric that requires SQL."
+  }
 ];
 
 const MARKDOWN_COMPONENTS = {
@@ -89,7 +109,9 @@ function AuthenticatedApp() {
   const [loading, setLoading] = useState(false);
   const [cancellingRunId, setCancellingRunId] = useState<string | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const turnListRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     async function loadOptions() {
@@ -131,6 +153,19 @@ function AuthenticatedApp() {
       block: "end"
     });
   }, [turns, loading]);
+
+  useEffect(() => {
+    if (!aboutOpen) {
+      return;
+    }
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setAboutOpen(false);
+      }
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [aboutOpen]);
 
   async function loadRunTrace(
     turnId: string,
@@ -347,6 +382,14 @@ function AuthenticatedApp() {
     }
   }
 
+  function selectStarterWorkflow(question: string) {
+    setMessage(question);
+    window.requestAnimationFrame(() => {
+      composerRef.current?.focus();
+      composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
+
   return (
     <main className="app-shell">
       <aside className="control-rail">
@@ -362,8 +405,10 @@ function AuthenticatedApp() {
           <section className="user-control" aria-label="Signed-in user">
             <div>
               <strong>{user.display_name}</strong>
-              <span>{user.email ?? user.user_id}</span>
-              <small>{user.role ?? "No application role"}</small>
+              <span>
+                {user.role ?? "No application role"} • Property {propertyCode.toUpperCase()}
+              </span>
+              <small>{authMode === "entra" ? "Microsoft Entra ID" : "Local demo identity"}</small>
             </div>
             {authMode === "entra" ? (
               <button type="button" onClick={() => void signOut()} aria-label="Sign out">
@@ -415,6 +460,43 @@ function AuthenticatedApp() {
           </section>
         ) : null}
 
+        <section className="security-summary" aria-label="Agent security status">
+          <div className="security-summary-heading">
+            <ShieldCheck aria-hidden="true" />
+            <span>Security &amp; agent status</span>
+          </div>
+          <ul>
+            <li>
+              <CheckCircle2 aria-hidden="true" />
+              <span>
+                <strong>Authenticated</strong>
+                <small>{authMode === "entra" ? "Entra token validated" : "Explicit local demo mode"}</small>
+              </span>
+            </li>
+            <li>
+              <LockKeyhole aria-hidden="true" />
+              <span>
+                <strong>Property scoped</strong>
+                <small>Backend enforced • {propertyCode.toUpperCase()}</small>
+              </span>
+            </li>
+            <li>
+              <Workflow aria-hidden="true" />
+              <span>
+                <strong>Bounded agent</strong>
+                <small>Step, tool, retry &amp; time limits</small>
+              </span>
+            </li>
+            <li>
+              <GitPullRequestArrow aria-hidden="true" />
+              <span>
+                <strong>Human approval enforced</strong>
+                <small>Sensitive SQL is checkpoint gated</small>
+              </span>
+            </li>
+          </ul>
+        </section>
+
         {bootError ? <p className="status-error">{bootError}</p> : null}
       </aside>
 
@@ -427,7 +509,13 @@ function AuthenticatedApp() {
             </span>
             <h2>{activeProperty?.property_name ?? "Property Assistant"}</h2>
           </div>
-          {activeModel ? <span className="sr-only">Selected model: {activeModel.label}</span> : null}
+          <div className="header-actions">
+            {activeModel ? <span className="sr-only">Selected model: {activeModel.label}</span> : null}
+            <button type="button" className="about-trigger" onClick={() => setAboutOpen(true)}>
+              <Info aria-hidden="true" />
+              How this agent works
+            </button>
+          </div>
         </div>
 
         {turns.length === 0 ? (
@@ -435,15 +523,20 @@ function AuthenticatedApp() {
             <div className="empty-icon">
               <MessageSquareText aria-hidden="true" />
             </div>
-            <h3>Ask about this property</h3>
+            <h3>Try an agent workflow</h3>
             <p>
-              Pull together rent-roll metrics, website evidence, charts, tables, and
-              source links for the selected property.
+              Choose an example to place it in the composer. Review or edit it before
+              asking the property-scoped agent to run.
             </p>
             <div className="starter-grid">
-              {STARTER_QUESTIONS.map((question) => (
-                <button key={question} type="button" onClick={() => void submitQuestion(question)}>
-                  {question}
+              {STARTER_WORKFLOWS.map((workflow) => (
+                <button
+                  key={workflow.label}
+                  type="button"
+                  onClick={() => selectStarterWorkflow(workflow.question)}
+                >
+                  <span>{workflow.label}</span>
+                  <strong>{workflow.question}</strong>
                 </button>
               ))}
             </div>
@@ -549,6 +642,7 @@ function AuthenticatedApp() {
 
         <form className="composer" onSubmit={handleSubmit}>
           <textarea
+            ref={composerRef}
             value={message}
             onChange={(event) => setMessage(event.target.value)}
             onKeyDown={handleComposerKeyDown}
@@ -561,6 +655,59 @@ function AuthenticatedApp() {
           </button>
         </form>
       </section>
+
+      {aboutOpen ? (
+        <div className="about-backdrop" role="presentation" onMouseDown={() => setAboutOpen(false)}>
+          <section
+            className="about-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="about-agent-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="about-dialog-heading">
+              <div>
+                <span className="eyebrow">
+                  <ShieldCheck aria-hidden="true" />
+                  Identity-aware orchestration
+                </span>
+                <h2 id="about-agent-title">How this agent works</h2>
+              </div>
+              <button type="button" onClick={() => setAboutOpen(false)} aria-label="Close">
+                <X aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="agent-flow" aria-label="Agent architecture flow">
+              {[
+                "User",
+                authMode === "entra" ? "Entra authentication" : "Local demo authentication",
+                "FastAPI",
+                "Bounded agent runtime",
+                "Authorization policy",
+                "Typed tool registry",
+                "MySQL + hybrid retrieval",
+                "Evidence verification",
+                "Response"
+              ].map((step, index, steps) => (
+                <div className="agent-flow-item" key={step}>
+                  <span>{step}</span>
+                  {index < steps.length - 1 ? <strong aria-hidden="true">→</strong> : null}
+                </div>
+              ))}
+            </div>
+
+            <ul className="agent-guardrails">
+              <li>Tools are typed and allowlisted.</li>
+              <li>Identity and property scope are injected and enforced by the backend.</li>
+              <li>Sensitive SQL pauses for explicit, re-authorized human approval.</li>
+              <li>Runs are checkpointed with bounded steps, retries, tools, and duration.</li>
+              <li>Responses are verified against stored, property-scoped evidence.</li>
+              <li>Run Trace exposes operational decisions—not private model reasoning.</li>
+            </ul>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

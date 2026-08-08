@@ -1,6 +1,70 @@
 # Aker Property Assistant
 
-Property-scoped AI chatbot prototype for answering questions about a selected Aker property, such as `115r`.
+A full-stack, identity-aware property operations agent that runs bounded workflows across rent-roll data and hybrid retrieval, with least-privilege tools, human-gated SQL, durable traces, and evidence-verified answers.
+
+## Why this project is interesting
+
+- **Production-shaped full stack:** React, TypeScript, MSAL, FastAPI, Pydantic, MySQL, Chroma, and BM25 work as one property analytics experience.
+- **Bounded agent orchestration:** a plan-execute-observe-decide runtime constrains steps, tools, retries, duration, repetition, and cancellation instead of giving the model an open-ended loop.
+- **Identity-aware least privilege:** Microsoft Entra identity, backend property grants, typed tool permissions, and server-injected scope stay outside model control.
+- **Human-in-the-loop SQL:** custom analytics pause at a durable checkpoint; approval is re-authorized, and only the server-stored read-only query can execute.
+- **Inspectable and evaluated:** checkpointed runs, sanitized Run Trace events, stored evidence, final verification, failure injection, and deterministic evaluations make behavior reviewable.
+
+## Demo
+
+The application opens with four recruiter-friendly workflows covering retrieval, structured analytics, a hybrid investigation, and privileged SQL. Selecting one fills the composer without executing it, so the prompt can be reviewed before the run begins.
+
+No screenshots or recordings are currently committed. Capture these assets from a real local run and place them at the paths below—do not use mock data or fabricated UI:
+
+| Capture | Target location | What to show |
+| --- | --- | --- |
+| Application overview | `docs/demo/application-overview.png` | Signed-in identity, active role/property, enforced-status area, and example workflows |
+| Agent Run Trace | `docs/demo/run-trace.png` | Authentication, authorization, planning, tool execution, stored evidence, verification, duration, and final status |
+| SQL approval | `docs/demo/sql-approval.png` | Checkpointed SQL proposal and explicit human approval control; use redacted/demo data only |
+| Optional 30–60 second recording | `docs/demo/agent-workflow.gif` or a hosted video link | Prompt selection → bounded execution → evidence-grounded answer → expanded Run Trace |
+
+After capture, add the first three images here with descriptive alt text and link the optional video from this section.
+
+## Architecture at a glance
+
+```mermaid
+flowchart TD
+  User["Authenticated user"] --> UI["React + MSAL"]
+  UI --> API["FastAPI"]
+  API --> Security["Identity + authorization policy"]
+  Security --> Runtime["Bounded agent runtime"]
+  Runtime --> Planner["Planner"]
+  Planner --> Registry["Typed, allowlisted tool registry"]
+  Registry --> Executor["Authorized tool executor"]
+  Security -. "role + property permission" .-> Executor
+  Executor --> MySQL["MySQL rent-roll data"]
+  Executor --> Retrieval["Property-filtered hybrid retrieval"]
+  MySQL --> Evidence["Stored scoped evidence"]
+  Retrieval --> Evidence
+  Evidence --> Verify["Evidence verification"]
+  Verify --> Response["Grounded response"]
+  Response --> UI
+
+  Runtime <--> Checkpoints["Durable checkpoints"]
+  Runtime --> Trace["Sanitized Run Trace"]
+  Trace --> UI
+  Executor -->|"sensitive custom SQL"| Approval["Human approval checkpoint"]
+  UI -->|"approve / reject with current identity"| Approval
+  Approval -->|"re-authorize + resume"| Executor
+```
+
+The model can propose a plan or tool call, but authentication, property scope, permission decisions, approval state, execution limits, evidence storage, and final verification remain backend-owned.
+
+## Agent Security Model
+
+1. Identity comes from a validated Entra token—or an explicitly labeled, production-disabled local demo identity—not from the LLM.
+2. Property scope is authorized and injected server-side; model- or browser-supplied trusted tool arguments are discarded.
+3. Tools are allowlisted, typed, and carry explicit permission and scope metadata.
+4. The backend authorization policy runs before every tool handler executes.
+5. Sensitive custom SQL requires explicit human approval by an authorized `PropertyManager`.
+6. Approval resumes SQL stored in the scoped server checkpoint; the browser cannot provide replacement SQL for execution.
+7. Step, tool-call, retry, repetition, approval, duration, queue, and cancellation limits bound execution and failure recovery.
+8. Operational traces expose statuses and safe metadata, never hidden chain-of-thought, private prompts, bearer tokens, secrets, or raw SQL outside the intentional approval UI.
 
 The assistant combines structured rent-roll data in MySQL with scraped public property website content. It supports runtime LLM switching, Markdown responses, streamed LLM output, property-scoped retrieval, and structured UI components such as KPI cards, charts, tables, and comparisons.
 
