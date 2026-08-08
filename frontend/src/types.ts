@@ -4,6 +4,15 @@ export type ModelOption = {
   provider: string;
 };
 
+export type AuthenticatedUser = {
+  user_id: string;
+  display_name: string;
+  email?: string | null;
+  tenant_id: string;
+  roles: string[];
+  role?: string | null;
+};
+
 export type PropertyOption = {
   property_code: string;
   property_name: string;

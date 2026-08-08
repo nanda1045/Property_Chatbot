@@ -7,6 +7,9 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 ## Features
 
 - Property-scoped chat by active `property_code`.
+- Microsoft Entra ID SPA authentication with a recruiter-friendly local demo mode.
+- Backend-enforced Viewer, Analyst, and PropertyManager authorization.
+- Identity-aware property grants and tool permissions that the planner cannot override.
 - Structured rent-roll analytics from MySQL.
 - Unstructured website retrieval from scraped property pages.
 - Hybrid retrieval using Chroma vector search, BM25 keyword search, and reciprocal rank fusion.
@@ -33,9 +36,9 @@ The assistant combines structured rent-roll data in MySQL with scraped public pr
 app/agents/                  Agent runtime, workflow, planner, state, and policies
 app/memory/                  Durable conversation, run, artifact, and evidence stores
 app/tools/                   Typed contracts, registry, executor, and property tools
-app/core/                    Validated settings, structured logging/errors, HTTP policy hooks
+app/core/                    Authentication, authorization, settings, logging/errors, HTTP hooks
 app/                         FastAPI backend, services, tools, retrieval clients
-frontend/                    React/Vite chatbot UI
+frontend/                    React/Vite chatbot UI with MSAL authentication
 scripts/                     Data loading, scraping, ingestion, and eval runners
 Data/                        Structured input/output data and retrieval indexes
 config/property_sources.json Property website source map
@@ -101,6 +104,7 @@ cd /path/to/AKER_Chatbot
 ```bash
 touch .env
 cp .env.example .env
+cp frontend/.env.example frontend/.env
 ```
 
 5. Add any real model keys in .env you want to use:
@@ -250,6 +254,7 @@ cd frontend && npm ci && cd ..
 
 # Configure local settings on first setup, then add optional model API keys.
 test -f .env || cp .env.example .env
+test -f frontend/.env || cp frontend/.env.example frontend/.env
 
 # Start and initialize MySQL.
 docker compose up -d mysql
@@ -298,11 +303,76 @@ Important settings are validated when the backend imports its configuration:
 | `MYSQL_*` | See `.env.example` | Database connection and bounded connect timeout |
 | `DEFAULT_LLM_PROVIDER` / `DEFAULT_LLM_MODEL` | Anthropic / Claude Haiku | Default answer model |
 | `EMBEDDING_PROVIDER` | `sentence_transformer` | Local semantic embedding implementation |
-| `RUNTIME_USER_ID` | `local-user` | Trusted local user scope until authentication exists |
+| `AUTH_MODE` | `local` | Uses `local` demo identity or validated `entra` bearer tokens |
+| `LOCAL_AUTH_*` | See `.env.example` | Demo identity, role, and accessible properties; production rejects local mode |
+| `ENTRA_*` | Empty in local mode | Single-tenant issuer, API audience, delegated scope, and JWKS settings |
+| `AUTH_PROPERTY_ACCESS` | `{}` | Backend-owned Entra object-ID/app-role to property-code grants |
 | `AGENT_MAX_*` | See `.env.example` | Step, tool, retry, approval, and duration limits |
 | `STREAM_*` | See `.env.example` | SSE queue, polling, heartbeat, and cleanup bounds |
 
+### Microsoft Entra ID Setup
+
+Local demos need no tenant configuration: keep `AUTH_MODE=local` and
+`VITE_AUTH_MODE=local`. The backend creates the deterministic identity configured by
+`LOCAL_AUTH_*`; `APP_ENV=production` rejects this mode.
+
+For Entra mode, create two **single-tenant** app registrations:
+
+1. Create a backend Web API registration. Under **Expose an API**, keep or set the
+   Application ID URI to `api://<BACKEND_API_CLIENT_ID>` and add a delegated scope named
+   `access_as_user`. Configure the application to issue v2 access tokens.
+2. On that API registration, create app roles named exactly `Viewer`, `Analyst`, and
+   `PropertyManager`, allowed for users/groups. Assign users or groups to one of those
+   roles through the API enterprise application.
+3. Create a frontend SPA registration. Add SPA redirect URIs
+   `http://127.0.0.1:5173` and `http://localhost:5173` plus the deployed SPA URI. Do not
+   create or store a client secret for the browser application.
+4. Under the SPA registration's **API permissions**, add the backend API's delegated
+   `access_as_user` permission and grant the appropriate tenant consent.
+5. Put the SPA application/client ID in `VITE_ENTRA_CLIENT_ID`, the backend application
+   client ID in `ENTRA_API_AUDIENCE`, and use the same directory/tenant ID on both sides.
+   Set `VITE_ENTRA_API_SCOPE=api://<BACKEND_API_CLIENT_ID>/access_as_user`.
+6. Configure backend-owned property grants with Entra object IDs and/or app-role keys.
+   Identities without a matching grant are denied before an agent run starts:
+
+```dotenv
+AUTH_MODE=entra
+ENTRA_TENANT_ID=00000000-0000-0000-0000-000000000000
+ENTRA_API_AUDIENCE=11111111-1111-1111-1111-111111111111
+ENTRA_REQUIRED_SCOPE=access_as_user
+AUTH_PROPERTY_ACCESS={"USER_OBJECT_ID":["115r"],"role:PropertyManager":["*"]}
+
+# frontend/.env
+VITE_AUTH_MODE=entra
+VITE_ENTRA_TENANT_ID=00000000-0000-0000-0000-000000000000
+VITE_ENTRA_CLIENT_ID=22222222-2222-2222-2222-222222222222
+VITE_ENTRA_API_SCOPE=api://11111111-1111-1111-1111-111111111111/access_as_user
+```
+
+The frontend uses MSAL's authorization-code flow with PKCE and acquires an API access
+token silently before each protected request, falling back to an interactive popup only
+when Microsoft requires interaction. The API validates the RS256 signature using the
+tenant OpenID discovery document and rotating JWKS, then validates issuer, audience,
+expiration, tenant, v2 token version, delegated scope, and stable `oid` identity. Tokens,
+raw prompts, secrets, and model reasoning are never written to Run Trace.
+
+Role permissions are deliberately small:
+
+| Role | Backend permissions |
+| --- | --- |
+| `Viewer` | Chat, property profiles/KPIs, website retrieval, and scoped run trace |
+| `Analyst` | Viewer permissions plus analytical tools and custom analytical planning |
+| `PropertyManager` | Analyst permissions plus approval of server-stored custom SQL |
+
+The security boundary is: **the LLM may request a tool, but it can never grant itself
+permission to execute that tool**. Role claims, user identity, property grants, trusted
+scope injection, and the final allow/deny decision are all backend-owned.
+
 ## API Examples
+
+These examples work unchanged in local mode. In Entra mode, acquire the delegated API
+token through MSAL and add `-H "Authorization: Bearer $ACCESS_TOKEN"` to every protected
+request. `/health` and `/ready` remain unauthenticated operational probes.
 
 Blocking chat response:
 
@@ -357,7 +427,8 @@ curl -X POST http://127.0.0.1:8000/api/agent-runs/RUN_ID/approve \
 
 The approval endpoint reloads the saved checkpoint and executes the server-stored SQL
 draft. SQL sent by the client is not accepted by this endpoint. The legacy
-`POST /sql/execute` endpoint remains available for backward compatibility.
+`POST /sql/execute` remains as a compatibility alias for resuming a run by `run_id`.
+It no longer accepts or executes SQL text supplied by the browser.
 
 ## Architecture Overview
 
@@ -365,14 +436,19 @@ The system is organized as a scoped retrieval and orchestration pipeline.
 
 ```mermaid
 flowchart TD
-  User["User"] --> UI["React Chat UI"]
-  UI --> API["FastAPI API + Request Policy"]
-  API --> Runtime["Durable Agent Runtime"]
+  User["User"] --> UI["React Chat UI + MSAL"]
+  UI -->|Entra access token| TokenValidation["FastAPI Token Validation"]
+  TokenValidation --> Identity["Authenticated Identity + App Roles"]
+  Identity --> Runtime["Durable Agent Runtime"]
   Runtime --> Policies["Property and Safety Policies"]
-  Policies --> Planner["Structured Planner"]
+  Policies --> Planner["Structured Planner / LLM"]
   Planner --> Loop["Bounded Plan-Execute-Observe Loop"]
   Loop --> Registry["Typed Tool Registry"]
-  Registry --> Executor["Tool Executor"]
+  Registry --> Authorization["Backend Authorization Policy"]
+  Identity --> Authorization
+  PropertyGrants["Backend-Owned Property Grants"] --> Authorization
+  Authorization -->|allow| Executor["Tool Executor"]
+  Authorization -->|deny| Denied["Sanitized Authorization Event"]
   Executor --> PropertyDB["MySQL Property Database"]
   Executor --> Retrieval["BM25 + Chroma Retrieval"]
   PropertyDB --> Evidence["Stored Tool Evidence"]
@@ -386,35 +462,40 @@ flowchart TD
   Runtime <--> Checkpoints["MySQL Run + Checkpoint Store"]
   Loop --> Approval["SQL Approval Interrupt"]
   Approval --> Checkpoints
-  UI -->|approve or reject| API
-  API -->|resume saved run| Approval
+  UI -->|approve or reject + current token| TokenValidation
+  TokenValidation -->|recheck PropertyManager| ApprovalPolicy["SQL Approval Authorization"]
+  ApprovalPolicy -->|resume saved run| Approval
 
   Runtime --> Events["Sanitized Operational Events"]
+  Authorization --> Events
+  ApprovalPolicy --> Events
   Events --> EventStream["SSE Replay + Run Trace API"]
   EventStream --> UI
 ```
 
-The primary execution path is User → FastAPI → Agent Runtime → Planner → Tool
-Registry → Tool Executor → property database or retrieval → verification → citations.
+The primary execution path is User → React/MSAL → FastAPI token validation → trusted
+identity → Agent Runtime → Planner → Tool Registry → backend authorization → Tool
+Executor → property database or retrieval → verification → citations.
 Checkpoint persistence, SQL approval, and observability are side channels around that
 path rather than model-controlled tools.
 
-1. The user selects a property in the React UI.
-2. The frontend sends `property_code`, selected `model`, and the user message to FastAPI.
-3. The agent runtime creates a durable run scoped by backend-owned user identity, conversation, and active property. Each response includes `run_id` and `run_status`.
-4. The backend loads the selected property profile and normalizes the active `property_code`.
-5. The workflow creates `LLMToolPlanner`. The planner first applies deterministic guardrails for ambiguity, PII, unsafe SQL, unsupported external data, and cross-property requests.
-6. For real LLM models, the planner can classify the request as `structured`, `retrieval`, `hybrid`, `sql_approval`, `unsupported`, or `clarification`.
-7. Invalid planner output is retried within a fixed retry budget; if no valid plan is produced, the system falls back to deterministic planning.
-8. Tool names are validated against an allowlist and identical planned actions are deduplicated; property scoping is injected server-side, never trusted from the LLM.
-9. The bounded loop executes one tool action, validates and records its observation, then decides whether to continue. It stops on completion, approval, failure, repetition, or a configured limit.
+1. In Entra mode, MSAL signs the user in and acquires the delegated backend API token.
+2. FastAPI validates the token and creates a typed identity from trusted `oid`, `tid`,
+   display, email/username, and app-role claims. Local mode creates an explicit demo identity.
+3. The frontend sends `property_code`, selected `model`, and the user message; it never sends a trusted user ID or role.
+4. The backend rejects unauthorized properties and missing chat permission before creating a run.
+5. The agent runtime creates a durable run scoped by authenticated user identity, conversation, and active property. Each response includes `run_id` and `run_status`.
+6. The workflow creates `LLMToolPlanner`. Deterministic guardrails cover ambiguity, PII, unsafe SQL, unsupported data, and cross-property requests.
+7. Every requested tool is checked against the authenticated roles, backend property grants, required permission metadata, and active property before its handler can run.
+8. Tool names are allowlisted, trusted arguments are stripped from model input, repeated actions are deduplicated, and property scope is injected server-side.
+9. The bounded loop executes one authorized action, validates and records its observation, then decides whether to continue. It stops on completion, approval, failure, repetition, or a configured limit.
 10. Common structured analytics are routed to bounded SQL-backed tools such as latest KPIs, occupancy trend, charge breakdown, top balances, vacant units, rent by unit type, and rent vs lease charges.
 11. Website questions are routed to property-scoped retrieval over scraped website chunks.
 12. Custom structured metrics that are not covered by predefined tools can route to `sql_approval`.
 13. In `sql_approval`, the LLM drafts a read-only SQL query with `:property_code`; it does not execute SQL.
 14. The backend validates SQL drafts before they reach the UI. The guard checks allowed tables and columns, blocks PII, blocks unsafe operations, requires active-property scoping, rejects comments/semicolons/UNION, and requires row limits for row-level queries.
-15. Valid SQL drafts are shown in the UI for user approval before execution.
-16. Approved SQL is executed only through the backend approval endpoint, which binds the active `property_code` server-side.
+15. Valid SQL drafts are shown in the UI, but only an authenticated `PropertyManager` can approve them.
+16. The approval endpoint revalidates the current token, role, user/run scope, and property access. It executes only the checkpointed SQL and binds `property_code` server-side.
 17. Every structured SQL query is filtered by active `property_code`.
 18. Every retrieval query is filtered by active `property_code` metadata.
 19. Retrieval uses Chroma vector search plus BM25 keyword search, fused with reciprocal rank fusion.
@@ -459,9 +540,12 @@ backend-owned user identity, conversation, and active property.
 
 | Guarantee | Enforcement |
 | --- | --- |
+| Identity authenticity | Entra mode validates signature, issuer, audience, expiration, tenant, delegated scope, and stable object ID from a tenant-specific OpenID/JWKS endpoint. Production cannot start in local auth mode. |
+| Deterministic authorization | The central role-permission matrix and backend property grants run before handlers. User ID, roles, permission results, and active property cannot come from model or browser tool arguments. |
 | Property isolation | The backend injects the active property into tool scope, SQL parameters, retrieval metadata filters, memory keys, checkpoints, events, artifacts, and citation reads. Cross-property requests and evidence are rejected. |
 | Tool validation | Every registered tool has typed Pydantic input/output models, risk metadata, scope requirements, timeout, retry, idempotency, and output-size policy. The model cannot invent tools or trusted arguments. |
 | SQL safety | Generated SQL is read-only, allowlisted, property-parameterized, row-bounded where required, and paused for explicit approval. The server executes only its checkpointed draft. |
+| Approval reauthorization | The approval request validates the current identity, `PropertyManager` role, property grant, and user/run scope again, then executes only the server-stored draft. |
 | Retry policy | Only structured transient failures retry, using a fixed attempt bound with exponential backoff and jitter. Validation, policy, and permanent failures stop immediately. |
 | Idempotency | Identical idempotent reads reuse a per-run result without consuming another tool-call budget. SQL approval uses an atomic database claim to prevent duplicate execution. |
 | Execution limits | Configured step, tool-call, planner-retry, SQL-approval, total-duration, streaming-queue, and worker-backlog limits bound each run. Repeated identical actions are rejected. |
@@ -477,6 +561,11 @@ completion or failure. Events include run, conversation, property, step, tool, a
 latency, timestamp, and structured error identifiers when applicable. Tool arguments and
 outputs are reduced to sanitized operational details; private model reasoning fields are
 removed before persistence.
+
+Authentication and authorization add safe `AUTHENTICATED`, `AUTHORIZATION_ALLOWED`,
+`AUTHORIZATION_DENIED`, `SQL_APPROVAL_AUTHORIZED`, and `SQL_APPROVAL_DENIED` events.
+Their payloads contain only stable identity, role, property, tool, permission, outcome,
+and timestamp metadata—never bearer tokens, SQL text, raw prompts, or secrets.
 
 Run inspection requires the same conversation and property scope used to create the run:
 
@@ -605,6 +694,9 @@ These are the main interview-level design choices, including what each choice gi
 
 | Decision | Why | Trade-off |
 | --- | --- | --- |
+| Validate Entra identity at the API boundary | A tenant-specific issuer, API audience, delegated scope, stable object ID, and app-role claims establish a deterministic identity before agent work begins. | A real tenant requires two app registrations, consent, assignments, and environment configuration. |
+| Keep authorization outside the planner | The LLM can request a registered tool, but the executor independently evaluates trusted identity, role, permission metadata, and property grants. | New tools require an explicit permission classification in addition to input/output schemas. |
+| Keep an explicit local auth mode | Recruiters can run the full repository without Azure setup while production configuration rejects the demo identity. | Local mode demonstrates the boundary but does not exercise a real Microsoft sign-in. |
 | Use a bounded agent instead of a fully autonomous loop | Fixed budgets, typed actions, deterministic stop rules, and evidence verification make execution explainable and testable. | New task families may require a policy, tool, or planner example instead of emerging automatically. |
 | Inject trusted scope server-side | Property, user, database, and approval scope cannot safely come from model output or client-supplied tool arguments. | The backend owns more orchestration code and every new trusted dimension must be threaded through contracts. |
 | Persist checkpoints | A run can survive process restart, pause for human approval, expose status after disconnect, and produce an audit trail. | Each transition performs additional database writes and state-schema evolution must remain backward compatible. |
@@ -752,7 +844,9 @@ Evaluation coverage includes:
 - If a website hides data behind JavaScript or external APIs, the scraper may not capture every detail.
 - Real LLM calls require valid API keys and available credits.
 - The prototype is designed for local development, not production deployment.
-- There is no authentication or multi-user authorization layer.
+- Entra mode is single-tenant and uses configuration-backed property grants; a larger deployment would move grants to an administrative persistence layer with lifecycle tooling.
+- Local auth mode is intentionally a demo identity and must not be used as a production authentication mechanism.
+- The project does not call Microsoft Graph; display name, username, object ID, tenant, and roles come from validated access-token claims.
 - MySQL must be running and loaded before structured-data questions will work.
 - The assistant does not execute custom database metrics automatically. Custom structured metrics can produce a proposed read-only SQL query, but the user must approve it before execution.
 - The SQL approval guard is intentionally strict. Complex valid SQL may be rejected if it cannot prove every referenced table is scoped to the active property or if it references columns outside the allowlist.
@@ -767,6 +861,6 @@ Evaluation coverage includes:
 - Add richer semantic summarization and user-controlled conversation retention policies.
 - Add scheduled website re-scraping and index refresh jobs so retrieval content stays current.
 - Add stronger retrieval evaluation with larger golden datasets, human labels, and periodic LLM-judge scoring for faithfulness, answer relevance, and citation quality.
-- Add authentication and role-based access control, then forward the existing approval
-  audit records to tamper-resistant centralized retention before using sensitive data.
+- Move configuration-backed property grants into an administered entitlement store and
+  forward authorization/approval audit records to tamper-resistant centralized retention.
 - Move Chroma/BM25 to production-ready managed retrieval infrastructure if the number of properties or users grows.

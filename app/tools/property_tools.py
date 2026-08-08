@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
+from app.core.authorization import ToolPermission
 from app.core.config import Settings
 from app.db.mysql import MySQLDatabase
 from app.retrieval.embeddings import build_embedder
@@ -221,6 +222,7 @@ def build_property_tool_registry(
         timeout_seconds: float = 5.0,
         max_attempts: int = 3,
         required_scopes: tuple[str, ...] = ("property_code",),
+        required_permission: ToolPermission = ToolPermission.PROPERTY_BASIC_READ,
     ) -> None:
         registry.register(
             ToolSpec(
@@ -229,6 +231,7 @@ def build_property_tool_registry(
                 input_model=input_model,
                 output_model=output_model,
                 risk_level="read",
+                required_permission=required_permission,
                 timeout_seconds=timeout_seconds,
                 max_attempts=max_attempts,
                 idempotent=True,
@@ -247,7 +250,13 @@ def build_property_tool_registry(
         "list_properties",
         EmptyInput,
         PropertyCatalogOutput,
-        lambda _input, _context: repository.list_properties(),
+        lambda _input, context: [
+            item
+            for item in repository.list_properties()
+            if "*" in context.allowed_property_codes
+            or str(item.get("property_code") or "").lower()
+            in context.allowed_property_codes
+        ],
         required_scopes=(),
     )
     register(
@@ -261,6 +270,7 @@ def build_property_tool_registry(
         EmptyInput,
         LatestKpisOutput,
         lambda _input, context: repository.get_latest_kpis(_property_code(context)),
+        required_permission=ToolPermission.KPI_READ,
     )
     register(
         "get_occupancy_trend",
@@ -270,6 +280,7 @@ def build_property_tool_registry(
             _property_code(context),
             months=tool_input.months,
         ),
+        required_permission=ToolPermission.ANALYTICS_READ,
     )
     register(
         "get_charge_breakdown",
@@ -279,6 +290,7 @@ def build_property_tool_registry(
             _property_code(context),
             limit=tool_input.limit,
         ),
+        required_permission=ToolPermission.ANALYTICS_READ,
     )
     register(
         "get_top_balances",
@@ -288,6 +300,7 @@ def build_property_tool_registry(
             _property_code(context),
             limit=tool_input.limit,
         ),
+        required_permission=ToolPermission.ANALYTICS_READ,
     )
     register(
         "get_vacant_units",
@@ -300,6 +313,7 @@ def build_property_tool_registry(
                 tool_input.report_month.isoformat() if tool_input.report_month else None
             ),
         ),
+        required_permission=ToolPermission.ANALYTICS_READ,
     )
     register(
         "get_rent_by_unit_type",
@@ -311,6 +325,7 @@ def build_property_tool_registry(
                 tool_input.report_month.isoformat() if tool_input.report_month else None
             ),
         ),
+        required_permission=ToolPermission.ANALYTICS_READ,
     )
 
     def search_content(tool_input: SearchContentInput, context: TrustedToolContext) -> list[dict]:
@@ -340,5 +355,6 @@ def build_property_tool_registry(
         search_content,
         timeout_seconds=15.0,
         max_attempts=2,
+        required_permission=ToolPermission.RETRIEVAL_READ,
     )
     return registry

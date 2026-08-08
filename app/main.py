@@ -14,6 +14,13 @@ from fastapi.responses import StreamingResponse
 
 from app.agents.cancellation import AgentRunCancelledError
 from app.agents.runtime import AgentRunConflictError, AgentRunNotFoundError, AgentRuntime
+from app.core.auth import AuthenticatedUser, AuthenticatedUserDep
+from app.core.authorization import (
+    AuthorizationContext,
+    AuthorizationDeniedError,
+    ToolPermission,
+    authorize_permission,
+)
 from app.core.config import Settings, get_settings
 from app.core.errors import install_exception_handlers
 from app.core.http import RequestContextMiddleware
@@ -31,7 +38,6 @@ from app.schemas import (
     ChatRequest,
     ChatResponse,
     SqlApprovalRequest,
-    UIComponent,
 )
 from app.services.conversation_memory import ConversationMemory
 from app.services.rent_roll_repository import RentRollRepository
@@ -41,7 +47,6 @@ from app.services.run_stream import (
     StreamExecutorSaturatedError,
     active_run_cancellations,
 )
-from app.services.sql_approval import execute_approved_sql
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 RateLimitDep = Annotated[None, Depends(enforce_rate_limit)]
@@ -103,8 +108,20 @@ def readiness(settings: SettingsDep) -> dict[str, object]:
     }
 
 
+@app.get("/auth/me")
+def authenticated_identity(user: AuthenticatedUserDep) -> dict[str, object]:
+    return {
+        "user_id": user.user_id,
+        "display_name": user.display_name,
+        "email": user.email,
+        "tenant_id": user.tenant_id,
+        "roles": [role.value for role in user.roles],
+        "role": user.primary_role.value if user.primary_role is not None else None,
+    }
+
+
 @app.get("/models")
-def models(settings: SettingsDep) -> dict[str, object]:
+def models(settings: SettingsDep, _user: AuthenticatedUserDep) -> dict[str, object]:
     return {
         "models": [
             {
@@ -128,21 +145,43 @@ def models(settings: SettingsDep) -> dict[str, object]:
 
 
 @app.get("/properties")
-def properties(settings: SettingsDep) -> dict[str, list[dict]]:
+def properties(
+    settings: SettingsDep,
+    user: AuthenticatedUserDep,
+) -> dict[str, list[dict]]:
     repository = RentRollRepository(MySQLDatabase(settings))
-    return {"properties": repository.list_properties()}
+    authorization = _require_permission(
+        user,
+        settings,
+        None,
+        ToolPermission.PROPERTY_BASIC_READ,
+    )
+    return {
+        "properties": [
+            item
+            for item in repository.list_properties()
+            if authorization.can_access_property(str(item.get("property_code") or ""))
+        ]
+    }
 
 
 @app.post("/chat")
 def chat(
     request: ChatRequest,
     settings: SettingsDep,
+    user: AuthenticatedUserDep,
     _rate_limit: RateLimitDep,
 ) -> ChatResponse:
+    authorization = _require_permission(
+        user,
+        settings,
+        request.property_code,
+        ToolPermission.CHAT,
+    )
     conversation_id = request.conversation_id or str(uuid4())
     memory = _conversation_memory(settings)
     history = memory.get(
-        user_id=settings.runtime_user_id,
+        user_id=user.user_id,
         conversation_id=conversation_id,
         property_code=request.property_code,
     )
@@ -153,11 +192,12 @@ def chat(
         model=request.model,
         history=history,
         conversation_id=conversation_id,
-        user_id=settings.runtime_user_id,
+        user_id=user.user_id,
+        authorization_context=authorization,
     )
     response.conversation_id = conversation_id
     memory.add(
-        user_id=settings.runtime_user_id,
+        user_id=user.user_id,
         conversation_id=conversation_id,
         property_code=response.property_code,
         run_id=response.run_id,
@@ -173,66 +213,30 @@ def chat(
 def execute_sql(
     request: SqlApprovalRequest,
     settings: SettingsDep,
+    user: AuthenticatedUserDep,
     _rate_limit: RateLimitDep,
 ) -> ChatResponse:
-    if request.run_id:
-        if not request.conversation_id:
-            raise HTTPException(
-                status_code=422,
-                detail="conversation_id is required when resuming an agent run",
-            )
-        response = _resolve_agent_approval(
-            run_id=request.run_id,
-            property_code=request.property_code,
-            conversation_id=request.conversation_id,
-            approved=True,
-            settings=settings,
+    if not request.run_id or not request.conversation_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Direct SQL submission is disabled; approve a server-stored agent run draft."
+            ),
         )
-        _record_approval_response(response, request.question, settings)
-        return response
-
-    normalized_code = request.property_code.lower()
-    validated_sql, rows = execute_approved_sql(settings, request.sql, normalized_code)
-    _AUDIT_LOGGER.info(
-        "legacy_sql_approval_executed",
-        extra={
-            "event": "legacy_sql_approval_executed",
-            "conversation_id": request.conversation_id,
-            "property_code": normalized_code,
-            "decision": "approved",
-        },
+    authorization = AuthorizationContext.from_settings(
+        user,
+        settings,
+        property_code=request.property_code,
     )
-    response = ChatResponse(
-        property_code=normalized_code,
-        model=request.model,
+    response = _resolve_agent_approval(
+        run_id=request.run_id,
+        property_code=request.property_code,
         conversation_id=request.conversation_id,
-        answer_markdown=(
-            "I ran the approved read-only query for the selected property. "
-            f"It returned **{len(rows)}** row{'s' if len(rows) != 1 else ''}."
-        ),
-        components=[
-            UIComponent(
-                type="table",
-                title="Approved SQL Results",
-                data=rows,
-            )
-        ],
-        sources=[],
-        tool_results={
-            "approved_sql": validated_sql,
-            "question": request.question,
-            "row_count": len(rows),
-        },
+        approved=True,
+        settings=settings,
+        authorization_context=authorization,
     )
-    _conversation_memory(settings).add(
-        user_id=settings.runtime_user_id,
-        conversation_id=request.conversation_id,
-        property_code=normalized_code,
-        user_message=f"Approved SQL for: {request.question}",
-        assistant_answer=response.answer_markdown,
-        tool_result_keys=sorted(response.tool_results),
-        component_types=[component.type for component in response.components],
-    )
+    _record_approval_response(response, request.question or "custom SQL request", settings, user)
     return response
 
 
@@ -241,17 +245,24 @@ def approve_agent_run(
     run_id: str,
     request: AgentApprovalRequest,
     settings: SettingsDep,
+    user: AuthenticatedUserDep,
     _rate_limit: RateLimitDep,
 ) -> ChatResponse:
+    authorization = AuthorizationContext.from_settings(
+        user,
+        settings,
+        property_code=request.property_code,
+    )
     response = _resolve_agent_approval(
         run_id=run_id,
         property_code=request.property_code,
         conversation_id=request.conversation_id,
         approved=request.approved,
         settings=settings,
+        authorization_context=authorization,
     )
     question = str(response.tool_results.get("question") or "custom SQL request")
-    _record_approval_response(response, question, settings)
+    _record_approval_response(response, question, settings, user)
     return response
 
 
@@ -261,13 +272,15 @@ def get_agent_run(
     property_code: str,
     conversation_id: str,
     settings: SettingsDep,
+    user: AuthenticatedUserDep,
 ) -> AgentRunDetail:
+    _require_permission(user, settings, property_code, ToolPermission.RUN_READ)
     try:
         detail = AgentRuntime(settings).get_run(
             run_id=run_id,
             property_code=property_code,
             conversation_id=conversation_id,
-            user_id=settings.runtime_user_id,
+            user_id=user.user_id,
         )
     except AgentRunNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -280,13 +293,15 @@ def get_agent_run_steps(
     property_code: str,
     conversation_id: str,
     settings: SettingsDep,
+    user: AuthenticatedUserDep,
 ) -> list[AgentRunStep]:
+    _require_permission(user, settings, property_code, ToolPermission.RUN_READ)
     try:
         steps = AgentRuntime(settings).list_run_steps(
             run_id=run_id,
             property_code=property_code,
             conversation_id=conversation_id,
-            user_id=settings.runtime_user_id,
+            user_id=user.user_id,
         )
     except AgentRunNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -299,14 +314,16 @@ def get_agent_run_events(
     property_code: str,
     conversation_id: str,
     settings: SettingsDep,
+    user: AuthenticatedUserDep,
     after_sequence: int = Query(default=0, ge=0),
 ) -> list[AgentRunEvent]:
+    _require_permission(user, settings, property_code, ToolPermission.RUN_READ)
     try:
         events = AgentRuntime(settings).list_run_events(
             run_id=run_id,
             property_code=property_code,
             conversation_id=conversation_id,
-            user_id=settings.runtime_user_id,
+            user_id=user.user_id,
             after_sequence=after_sequence,
         )
     except AgentRunNotFoundError as error:
@@ -321,6 +338,7 @@ async def stream_agent_run_events(
     property_code: str,
     conversation_id: str,
     settings: SettingsDep,
+    user: AuthenticatedUserDep,
     after_sequence: int = Query(default=0, ge=0),
     follow: bool = True,
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
@@ -342,12 +360,13 @@ async def stream_agent_run_events(
             )
         cursor = max(cursor, parsed_event_id)
     runtime = AgentRuntime(settings)
+    _require_permission(user, settings, property_code, ToolPermission.RUN_READ)
     try:
         runtime.get_run(
             run_id=run_id,
             property_code=property_code,
             conversation_id=conversation_id,
-            user_id=settings.runtime_user_id,
+            user_id=user.user_id,
         )
     except AgentRunNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -362,7 +381,7 @@ async def stream_agent_run_events(
                 run_id=run_id,
                 property_code=property_code,
                 conversation_id=conversation_id,
-                user_id=settings.runtime_user_id,
+                user_id=user.user_id,
                 after_sequence=cursor,
             )
             for event in events:
@@ -374,7 +393,7 @@ async def stream_agent_run_events(
                 run_id=run_id,
                 property_code=property_code,
                 conversation_id=conversation_id,
-                user_id=settings.runtime_user_id,
+                user_id=user.user_id,
             )
             if detail["status"] in _TERMINAL_RUN_STATUSES or not follow:
                 yield _encode_sse(
@@ -409,13 +428,15 @@ def get_agent_run_citations(
     property_code: str,
     conversation_id: str,
     settings: SettingsDep,
+    user: AuthenticatedUserDep,
 ) -> list[AgentRunCitation]:
+    _require_permission(user, settings, property_code, ToolPermission.RUN_READ)
     try:
         citations = AgentRuntime(settings).list_run_citations(
             run_id=run_id,
             property_code=property_code,
             conversation_id=conversation_id,
-            user_id=settings.runtime_user_id,
+            user_id=user.user_id,
         )
     except AgentRunNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -427,19 +448,23 @@ def cancel_agent_run(
     run_id: str,
     request: AgentRunScopeRequest,
     settings: SettingsDep,
+    user: AuthenticatedUserDep,
     _rate_limit: RateLimitDep,
 ) -> AgentRunDetail:
+    _require_permission(user, settings, request.property_code, ToolPermission.RUN_CANCEL)
     try:
         detail = AgentRuntime(settings).cancel_run(
             run_id=run_id,
             property_code=request.property_code,
             conversation_id=request.conversation_id,
-            user_id=settings.runtime_user_id,
+            user_id=user.user_id,
         )
     except AgentRunNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except AgentRunConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except AuthorizationDeniedError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
     active_run_cancellations.request(run_id)
     return AgentRunDetail.model_validate(detail)
 
@@ -451,6 +476,7 @@ def _resolve_agent_approval(
     conversation_id: str,
     approved: bool,
     settings: Settings,
+    authorization_context: AuthorizationContext,
 ) -> ChatResponse:
     try:
         response = AgentRuntime(settings).resolve_sql_approval(
@@ -458,12 +484,15 @@ def _resolve_agent_approval(
             property_code=property_code,
             approved=approved,
             conversation_id=conversation_id,
-            user_id=settings.runtime_user_id,
+            user_id=authorization_context.user.user_id,
+            authorization_context=authorization_context,
         )
     except AgentRunNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except AgentRunConflictError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except AuthorizationDeniedError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
     _AUDIT_LOGGER.info(
         "sql_approval_decision",
         extra={
@@ -472,6 +501,12 @@ def _resolve_agent_approval(
             "conversation_id": conversation_id,
             "property_code": property_code.lower(),
             "decision": "approved" if approved else "rejected",
+            "user_id": authorization_context.user.user_id,
+            "role": (
+                authorization_context.primary_role.value
+                if authorization_context.primary_role is not None
+                else None
+            ),
         },
     )
     return response
@@ -481,9 +516,10 @@ def _record_approval_response(
     response: ChatResponse,
     question: str,
     settings: Settings,
+    user: AuthenticatedUser,
 ) -> None:
     _conversation_memory(settings).add(
-        user_id=settings.runtime_user_id,
+        user_id=user.user_id,
         conversation_id=response.conversation_id,
         property_code=response.property_code,
         run_id=response.run_id,
@@ -499,8 +535,15 @@ async def chat_stream(
     chat_request: ChatRequest,
     http_request: Request,
     settings: SettingsDep,
+    user: AuthenticatedUserDep,
     _rate_limit: RateLimitDep,
 ) -> StreamingResponse:
+    authorization = _require_permission(
+        user,
+        settings,
+        chat_request.property_code,
+        ToolPermission.CHAT,
+    )
     conversation_id = chat_request.conversation_id or str(uuid4())
     run_id = str(uuid4())
     buffer = RunStreamBuffer(settings.stream_queue_max_size)
@@ -511,7 +554,7 @@ async def chat_stream(
         try:
             memory = _conversation_memory(settings)
             history = memory.get(
-                user_id=settings.runtime_user_id,
+                user_id=user.user_id,
                 conversation_id=conversation_id,
                 property_code=chat_request.property_code,
             )
@@ -522,13 +565,14 @@ async def chat_stream(
                 on_token=buffer.publish_token,
                 history=history,
                 conversation_id=conversation_id,
-                user_id=settings.runtime_user_id,
+                user_id=user.user_id,
+                authorization_context=authorization,
                 run_id=run_id,
                 cancellation_requested=buffer.cancelled.is_set,
             )
             response.conversation_id = conversation_id
             memory.add(
-                user_id=settings.runtime_user_id,
+                user_id=user.user_id,
                 conversation_id=conversation_id,
                 property_code=response.property_code,
                 run_id=response.run_id,
@@ -602,7 +646,7 @@ async def chat_stream(
                         run_id=run_id,
                         property_code=chat_request.property_code,
                         conversation_id=conversation_id,
-                        user_id=settings.runtime_user_id,
+                        user_id=user.user_id,
                     )
                 except (AgentRunNotFoundError, AgentRunConflictError):
                     pass
@@ -641,6 +685,39 @@ def _sse_headers() -> dict[str, str]:
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
     }
+
+
+def _require_permission(
+    user: AuthenticatedUser,
+    settings: Settings,
+    property_code: str | None,
+    permission: ToolPermission,
+) -> AuthorizationContext:
+    authorization = AuthorizationContext.from_settings(
+        user,
+        settings,
+        property_code=property_code,
+    )
+    try:
+        authorize_permission(
+            authorization,
+            permission,
+            require_property=property_code is not None,
+        )
+    except AuthorizationDeniedError as error:
+        _AUDIT_LOGGER.info(
+            "authorization_denied",
+            extra={
+                "event": "AUTHORIZATION_DENIED",
+                "user_id": user.user_id,
+                "role": user.primary_role.value if user.primary_role is not None else None,
+                "property_code": property_code.lower() if property_code else None,
+                "permission": permission.value,
+                "outcome": "denied",
+            },
+        )
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    return authorization
 
 
 def _conversation_memory(settings: Settings) -> ConversationMemory:

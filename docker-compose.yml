@@ -24,6 +24,7 @@ services:
       APP_HOST: 0.0.0.0
       APP_PORT: 8000
       APP_RELOAD: "false"
+      AUTH_MODE: local
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_USER: root

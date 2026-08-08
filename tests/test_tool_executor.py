@@ -64,7 +64,12 @@ def build_executor(
 
 class ToolExecutorTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.context = TrustedToolContext(property_code="115R", user_id="user-1")
+        self.context = TrustedToolContext(
+            property_code="115R",
+            user_id="user-1",
+            roles=("PropertyManager",),
+            allowed_property_codes=("*",),
+        )
 
     def test_trusted_scope_is_injected_and_model_scope_is_ignored(self) -> None:
         captured: dict[str, Any] = {}
@@ -256,7 +261,11 @@ class ToolExecutorTests(unittest.TestCase):
         missing_scope = executor.execute(
             "double",
             {"value": 1},
-            TrustedToolContext(user_id="user-1"),
+            TrustedToolContext(
+                user_id="user-1",
+                roles=("PropertyManager",),
+                allowed_property_codes=("*",),
+            ),
         )
         oversized = executor.execute("double", {"value": 1}, self.context)
 

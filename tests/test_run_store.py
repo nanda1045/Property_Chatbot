@@ -448,6 +448,9 @@ class AgentRunStoreTests(unittest.TestCase):
             payload={
                 "sanitized_arguments": {"limit": 5},
                 "reasoning": "must never be persisted",
+                "access_token": "secret-access-token",
+                "refreshToken": "secret-refresh-token",
+                "raw_prompt": "private prompt",
                 "nested": {
                     "chain_of_thought": "private",
                     "systemPrompt": "private",
@@ -471,9 +474,24 @@ class AgentRunStoreTests(unittest.TestCase):
             ),
         )
         self.assertNotIn("reasoning", payload)
+        self.assertNotIn("access_token", payload)
+        self.assertNotIn("refreshToken", payload)
+        self.assertNotIn("raw_prompt", payload)
         self.assertNotIn("chain_of_thought", payload["nested"])
         self.assertNotIn("systemPrompt", payload["nested"])
         self.assertEqual(payload["nested"]["safe"], "visible")
+
+        store.record_event(
+            state,
+            "AUTHORIZATION_DENIED",
+            payload={
+                "user_id": "user-1",
+                "role": "Viewer",
+                "property_code": "115r",
+                "permission": "property.analytics.read",
+                "outcome": "denied",
+            },
+        )
 
         with self.assertRaisesRegex(ValueError, "unsupported observability event"):
             store.record_event(state, "model_private_reasoning")

@@ -42,6 +42,8 @@ from app.agents.policies import (
     property_scope_conflict,
     property_scope_conflict_answer,
 )
+from app.core.auth import local_authenticated_user
+from app.core.authorization import AuthorizationContext
 from app.core.config import Settings
 from app.schemas import ChatResponse, Source, UIComponent
 from app.services.intent_router import get_intent_router
@@ -281,6 +283,10 @@ class LangChainOrchestrator:
         self._property_code: str | None = None
         self._tool_invocations: list[ToolResult] = []
         self._cancellation_check: CancellationCheck | None = None
+        self._authorization_context = AuthorizationContext.from_settings(
+            local_authenticated_user(settings),
+            settings,
+        )
         self.tool_executor = ToolExecutor(
             build_property_tool_registry(settings),
             max_tool_calls=settings.agent_max_tool_calls,
@@ -301,12 +307,15 @@ class LangChainOrchestrator:
         conversation_id: str,
         event_sink: Callable[[dict[str, Any]], None],
         cancellation_check: CancellationCheck | None = None,
+        authorization_context: AuthorizationContext | None = None,
     ) -> None:
         """Attach backend-owned run scope and the durable operational event sink."""
         self._run_id = run_id
         self._conversation_id = conversation_id
         self._operational_event_sink = event_sink
         self._cancellation_check = cancellation_check
+        if authorization_context is not None:
+            self._authorization_context = authorization_context
 
     def _capture_tool_event(self, event: dict[str, Any]) -> None:
         captured = dict(event)
@@ -811,7 +820,12 @@ class LangChainOrchestrator:
                 action.arguments,
                 TrustedToolContext(
                     property_code=property_code,
-                    user_id=self.settings.runtime_user_id,
+                    user_id=self._authorization_context.user.user_id,
+                    tenant_id=self._authorization_context.user.tenant_id,
+                    roles=self._authorization_context.user.roles,
+                    allowed_property_codes=(
+                        self._authorization_context.allowed_property_codes
+                    ),
                     run_id=self._run_id,
                 ),
             )
@@ -2984,7 +2998,10 @@ class LangChainOrchestrator:
             arguments,
             TrustedToolContext(
                 property_code=property_code,
-                user_id=self.settings.runtime_user_id,
+                user_id=self._authorization_context.user.user_id,
+                tenant_id=self._authorization_context.user.tenant_id,
+                roles=self._authorization_context.user.roles,
+                allowed_property_codes=self._authorization_context.allowed_property_codes,
                 run_id=self._run_id,
             ),
         )

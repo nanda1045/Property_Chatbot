@@ -19,6 +19,13 @@ from app.agents.state import (
     new_agent_state,
     transition_agent_state,
 )
+from app.core.auth import local_authenticated_user
+from app.core.authorization import (
+    AuthorizationContext,
+    ToolPermission,
+    authorize_permission,
+    authorize_sql_approval,
+)
 from app.core.config import Settings
 from app.db.mysql import MySQLDatabase
 from app.memory.run_store import AgentRunStore, StepStatus
@@ -223,6 +230,7 @@ class AgentRuntime:
         history: list[dict[str, Any]] | None = None,
         conversation_id: str | None = None,
         user_id: str | None = None,
+        authorization_context: AuthorizationContext | None = None,
         run_id: str | None = None,
         cancellation_requested: CancellationCheck | None = None,
     ) -> ChatResponse:
@@ -230,9 +238,19 @@ class AgentRuntime:
             raise ValueError("conversation_id is required for durable agent execution")
         run_started = perf_counter()
 
+        trusted_authorization = authorization_context or AuthorizationContext.from_settings(
+            local_authenticated_user(self.settings).model_copy(
+                update={"user_id": user_id or self.settings.local_auth_user_id}
+            ),
+            self.settings,
+            property_code=property_code,
+        )
+        trusted_authorization = trusted_authorization.for_property(property_code)
+        authorize_permission(trusted_authorization, ToolPermission.CHAT)
+
         state = new_agent_state(
             conversation_id=conversation_id,
-            user_id=user_id or self.settings.runtime_user_id,
+            user_id=trusted_authorization.user.user_id,
             property_code=property_code,
             user_goal=message,
             max_steps=self.settings.agent_max_steps,
@@ -248,6 +266,37 @@ class AgentRuntime:
             payload={
                 "max_steps": state["max_steps"],
                 "max_tool_calls": state["max_tool_calls"],
+            },
+        )
+        run_store.record_event(
+            state,
+            "AUTHENTICATED",
+            duration_ms=0,
+            payload={
+                "user_id": trusted_authorization.user.user_id,
+                "role": (
+                    trusted_authorization.primary_role.value
+                    if trusted_authorization.primary_role is not None
+                    else None
+                ),
+                "property_code": state["property_code"],
+                "outcome": "authenticated",
+            },
+        )
+        run_store.record_event(
+            state,
+            "AUTHORIZATION_ALLOWED",
+            duration_ms=0,
+            payload={
+                "user_id": trusted_authorization.user.user_id,
+                "role": (
+                    trusted_authorization.primary_role.value
+                    if trusted_authorization.primary_role is not None
+                    else None
+                ),
+                "property_code": state["property_code"],
+                "permission": ToolPermission.CHAT.value,
+                "outcome": "allowed",
             },
         )
         run_store.checkpoint(state, "run_created")
@@ -304,6 +353,7 @@ class AgentRuntime:
                         event,
                     ),
                     cancellation_check=cancellation_requested,
+                    authorization_context=trusted_authorization,
                 )
 
             def publish_token(token: str) -> None:
@@ -387,6 +437,45 @@ class AgentRuntime:
                 None,
             )
             if pending_component is not None:
+                try:
+                    authorize_permission(
+                        trusted_authorization,
+                        ToolPermission.CUSTOM_ANALYTICS,
+                    )
+                except PermissionError:
+                    run_store.record_event(
+                        state,
+                        "AUTHORIZATION_DENIED",
+                        step_id=step_id,
+                        payload={
+                            "user_id": trusted_authorization.user.user_id,
+                            "role": (
+                                trusted_authorization.primary_role.value
+                                if trusted_authorization.primary_role is not None
+                                else None
+                            ),
+                            "property_code": state["property_code"],
+                            "permission": ToolPermission.CUSTOM_ANALYTICS.value,
+                            "outcome": "denied",
+                        },
+                    )
+                    raise
+                run_store.record_event(
+                    state,
+                    "AUTHORIZATION_ALLOWED",
+                    step_id=step_id,
+                    payload={
+                        "user_id": trusted_authorization.user.user_id,
+                        "role": (
+                            trusted_authorization.primary_role.value
+                            if trusted_authorization.primary_role is not None
+                            else None
+                        ),
+                        "property_code": state["property_code"],
+                        "permission": ToolPermission.CUSTOM_ANALYTICS.value,
+                        "outcome": "allowed",
+                    },
+                )
                 pending_component.data["run_id"] = state["run_id"]
                 state["pending_approval"] = dict(pending_component.data)
                 state["artifacts"].append(
@@ -556,11 +645,20 @@ class AgentRuntime:
         approved: bool,
         conversation_id: str,
         user_id: str | None = None,
+        authorization_context: AuthorizationContext | None = None,
     ) -> ChatResponse:
         """Resume a checkpointed SQL run using only the backend-stored SQL draft."""
         resumed_at = perf_counter()
         normalized_code = property_code.lower()
-        trusted_user_id = user_id or self.settings.runtime_user_id
+        trusted_authorization = authorization_context or AuthorizationContext.from_settings(
+            local_authenticated_user(self.settings).model_copy(
+                update={"user_id": user_id or self.settings.local_auth_user_id}
+            ),
+            self.settings,
+            property_code=normalized_code,
+        )
+        trusted_authorization = trusted_authorization.for_property(normalized_code)
+        trusted_user_id = trusted_authorization.user.user_id
         run_store = self._run_store_factory(self.settings)
         state = run_store.load_latest_checkpoint(
             run_id,
@@ -574,6 +672,41 @@ class AgentRuntime:
             raise AgentRunConflictError(
                 f"run is {state['status']}; expected waiting_for_approval"
             )
+
+        try:
+            authorize_sql_approval(trusted_authorization)
+        except PermissionError:
+            run_store.record_event(
+                state,
+                "SQL_APPROVAL_DENIED",
+                payload={
+                    "user_id": trusted_user_id,
+                    "role": (
+                        trusted_authorization.primary_role.value
+                        if trusted_authorization.primary_role is not None
+                        else None
+                    ),
+                    "property_code": normalized_code,
+                    "permission": ToolPermission.SQL_APPROVE.value,
+                    "outcome": "denied",
+                },
+            )
+            raise
+        run_store.record_event(
+            state,
+            "SQL_APPROVAL_AUTHORIZED",
+            payload={
+                "user_id": trusted_user_id,
+                "role": (
+                    trusted_authorization.primary_role.value
+                    if trusted_authorization.primary_role is not None
+                    else None
+                ),
+                "property_code": normalized_code,
+                "permission": ToolPermission.SQL_APPROVE.value,
+                "outcome": "allowed",
+            },
+        )
 
         pending = state["pending_approval"]
         if not pending or not isinstance(pending.get("sql"), str):
@@ -803,7 +936,7 @@ class AgentRuntime:
         store = self._run_store_factory(self.settings)
         detail = store.get_run_detail(
             run_id,
-            user_id or self.settings.runtime_user_id,
+            user_id or self.settings.local_auth_user_id,
             conversation_id,
             property_code.lower(),
         )
@@ -823,7 +956,7 @@ class AgentRuntime:
         if (
             store.get_run_detail(
                 run_id,
-                user_id or self.settings.runtime_user_id,
+                user_id or self.settings.local_auth_user_id,
                 conversation_id,
                 property_code.lower(),
             )
@@ -832,7 +965,7 @@ class AgentRuntime:
             raise AgentRunNotFoundError("agent run was not found")
         return store.list_steps_scoped(
             run_id,
-            user_id or self.settings.runtime_user_id,
+            user_id or self.settings.local_auth_user_id,
             conversation_id,
             property_code.lower(),
         )
@@ -850,7 +983,7 @@ class AgentRuntime:
         if (
             store.get_run_detail(
                 run_id,
-                user_id or self.settings.runtime_user_id,
+                user_id or self.settings.local_auth_user_id,
                 conversation_id,
                 property_code.lower(),
             )
@@ -859,7 +992,7 @@ class AgentRuntime:
             raise AgentRunNotFoundError("agent run was not found")
         return store.list_events(
             run_id,
-            user_id or self.settings.runtime_user_id,
+            user_id or self.settings.local_auth_user_id,
             conversation_id,
             property_code.lower(),
             after_sequence,
@@ -874,7 +1007,7 @@ class AgentRuntime:
         user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         store = self._run_store_factory(self.settings)
-        trusted_user_id = user_id or self.settings.runtime_user_id
+        trusted_user_id = user_id or self.settings.local_auth_user_id
         normalized_code = property_code.lower()
         if (
             store.get_run_detail(
@@ -902,7 +1035,7 @@ class AgentRuntime:
         user_id: str | None = None,
     ) -> dict[str, Any]:
         normalized_code = property_code.lower()
-        trusted_user_id = user_id or self.settings.runtime_user_id
+        trusted_user_id = user_id or self.settings.local_auth_user_id
         store = self._run_store_factory(self.settings)
         state = store.load_scoped(
             run_id,

@@ -4,17 +4,26 @@ import type {
   AgentRunEvent,
   AgentRunStep,
   AgentRunTrace,
+  AuthenticatedUser,
   ChatResponse,
   ModelOption,
   PropertyOption
 } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+type AccessTokenProvider = () => Promise<string | null>;
+let accessTokenProvider: AccessTokenProvider = async () => null;
+
+export function setAccessTokenProvider(provider: AccessTokenProvider) {
+  accessTokenProvider = provider;
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const accessToken = await accessTokenProvider();
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...init?.headers
     },
     ...init
@@ -26,6 +35,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function getAuthenticatedUser(): Promise<AuthenticatedUser> {
+  return request("/auth/me");
 }
 
 export async function getModels(): Promise<{ models: ModelOption[]; default: string }> {
@@ -48,25 +61,6 @@ export async function sendChat(params: {
       property_code: params.propertyCode,
       model: params.model,
       message: params.message,
-      conversation_id: params.conversationId
-    })
-  });
-}
-
-export async function executeApprovedSql(params: {
-  propertyCode: string;
-  model: string;
-  sql: string;
-  question: string;
-  conversationId?: string;
-}): Promise<ChatResponse> {
-  return request("/sql/execute", {
-    method: "POST",
-    body: JSON.stringify({
-      property_code: params.propertyCode,
-      model: params.model,
-      sql: params.sql,
-      question: params.question,
       conversation_id: params.conversationId
     })
   });
@@ -172,10 +166,12 @@ export async function sendChatStream(
   },
   handlers: StreamHandlers
 ): Promise<ChatResponse> {
+  const accessToken = await accessTokenProvider();
   const response = await fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
     },
     signal: params.signal,
     body: JSON.stringify({

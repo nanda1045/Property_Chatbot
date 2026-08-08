@@ -106,7 +106,12 @@ class PropertyToolRegistryTests(unittest.TestCase):
             property_retriever=self.retriever,
         )
         self.executor = ToolExecutor(self.registry, trace_sink=lambda _event: None)
-        self.context = TrustedToolContext(property_code="115R", user_id="user-1")
+        self.context = TrustedToolContext(
+            property_code="115R",
+            user_id="user-1",
+            roles=("PropertyManager",),
+            allowed_property_codes=("*",),
+        )
 
     def test_registry_contains_every_existing_property_tool(self) -> None:
         self.assertEqual(

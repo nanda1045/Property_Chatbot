@@ -8,6 +8,8 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from app.core.auth import local_authenticated_user
+from app.core.authorization import AuthorizationContext
 from app.core.config import Settings
 from app.core.logging import JsonLogFormatter, request_id_context
 from app.core.rate_limit import RateLimitDecision
@@ -30,6 +32,9 @@ class ProductionHardeningTests(unittest.TestCase):
             app_reload=False,
             log_level="warning",
             mysql_password="not-logged",
+            auth_mode="entra",
+            entra_tenant_id="00000000-0000-0000-0000-000000000001",
+            entra_api_audience="00000000-0000-0000-0000-000000000002",
         )
 
         self.assertEqual(settings.app_env, "production")
@@ -42,7 +47,7 @@ class ProductionHardeningTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             Settings(_env_file=None, app_env="production", app_reload=True)
         with self.assertRaises(ValidationError):
-            Settings(_env_file=None, runtime_user_id="   ")
+            Settings(_env_file=None, local_auth_user_id="   ")
 
     def test_liveness_does_not_require_database_and_readiness_does(self) -> None:
         health = self.client.get("/health")
@@ -123,12 +128,19 @@ class ProductionHardeningTests(unittest.TestCase):
             patch("app.main.AgentRuntime", FakeRuntime),
             self.assertLogs("aker.audit", level="INFO") as captured,
         ):
+            settings = Settings(_env_file=None)
+            user = local_authenticated_user(settings)
             _resolve_agent_approval(
                 run_id="run-1",
                 property_code="115r",
                 conversation_id="conversation-1",
                 approved=True,
-                settings=Settings(_env_file=None),
+                settings=settings,
+                authorization_context=AuthorizationContext.from_settings(
+                    user,
+                    settings,
+                    property_code="115r",
+                ),
             )
 
         self.assertIn("sql_approval_decision", captured.output[0])

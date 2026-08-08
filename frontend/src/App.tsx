@@ -5,6 +5,8 @@ import {
   Building2,
   ExternalLink,
   Loader2,
+  LogIn,
+  LogOut,
   MapPin,
   MessageSquareText,
   Send,
@@ -15,6 +17,7 @@ import remarkGfm from "remark-gfm";
 
 import { ComponentRenderer } from "./components/ComponentRenderer";
 import { RunTracePanel } from "./components/RunTracePanel";
+import { useAuth } from "./auth";
 import {
   approveAgentRun,
   cancelAgentRun,
@@ -74,7 +77,8 @@ function getInitialConversationId() {
   return next;
 }
 
-export default function App() {
+function AuthenticatedApp() {
+  const { mode: authMode, user, signOut } = useAuth();
   const [models, setModels] = useState<ModelOption[]>([]);
   const [properties, setProperties] = useState<PropertyOption[]>([]);
   const [model, setModel] = useState(DEFAULT_MODEL_ID);
@@ -354,6 +358,21 @@ export default function App() {
           </div>
         </div>
 
+        {user ? (
+          <section className="user-control" aria-label="Signed-in user">
+            <div>
+              <strong>{user.display_name}</strong>
+              <span>{user.email ?? user.user_id}</span>
+              <small>{user.role ?? "No application role"}</small>
+            </div>
+            {authMode === "entra" ? (
+              <button type="button" onClick={() => void signOut()} aria-label="Sign out">
+                <LogOut aria-hidden="true" />
+              </button>
+            ) : null}
+          </section>
+        ) : null}
+
         <div className="control-card">
           <label>
             <span>Property</span>
@@ -544,4 +563,33 @@ export default function App() {
       </section>
     </main>
   );
+}
+
+export default function App() {
+  const { mode, user, loading, error, signIn } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="auth-gate">
+        <Loader2 className="spin" aria-hidden="true" />
+        <p>Loading your workspace…</p>
+      </div>
+    );
+  }
+  if (!user) {
+    return (
+      <div className="auth-gate">
+        <Building2 aria-hidden="true" />
+        <h1>Aker Assistant</h1>
+        <p>{error ?? "Sign in with your Microsoft work account to continue."}</p>
+        {mode === "entra" ? (
+          <button type="button" onClick={() => void signIn()}>
+            <LogIn aria-hidden="true" />
+            Sign in with Microsoft
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+  return <AuthenticatedApp />;
 }

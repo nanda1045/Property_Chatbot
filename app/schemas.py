@@ -27,28 +27,15 @@ class ChatRequest(BaseModel):
 class SqlApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    run_id: str | None = Field(
-        default=None,
-        description="Durable run to resume. Legacy requests may omit this field.",
-    )
+    run_id: str = Field(description="Durable run containing the server-stored SQL draft.")
     property_code: str = Field(
         min_length=1,
         max_length=32,
         pattern=r"^[A-Za-z0-9_-]+$",
         description="Active property code, for example 115r.",
     )
-    model: str = Field(default="anthropic:claude-haiku-4-5-20251001", max_length=128)
-    sql: str = Field(
-        min_length=1,
-        max_length=20000,
-        description="Backend-validated read-only SQL proposed for approval.",
-    )
-    question: str = Field(
-        min_length=1,
-        max_length=8000,
-        description="Original user question that produced the SQL proposal.",
-    )
-    conversation_id: str | None = Field(default=None, min_length=1, max_length=128)
+    question: str | None = Field(default=None, min_length=1, max_length=8000)
+    conversation_id: str = Field(min_length=1, max_length=128)
 
 
 class AgentApprovalRequest(BaseModel):

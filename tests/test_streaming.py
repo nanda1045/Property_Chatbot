@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from app.agents.cancellation import AgentRunCancelledError
+from app.core.auth import local_authenticated_user
 from app.core.config import Settings
 from app.main import app, chat_stream
 from app.schemas import ChatRequest, ChatResponse
@@ -250,6 +251,11 @@ class StreamingApiTests(unittest.TestCase):
                 return {**RUN_DETAIL, "run_id": kwargs["run_id"], "status": "cancelled"}
 
         async def consume() -> list[str]:
+            settings = Settings(
+                _env_file=None,
+                stream_poll_interval_seconds=0.01,
+                stream_thread_join_seconds=1,
+            )
             response = await chat_stream(
                 ChatRequest(
                     property_code="115r",
@@ -258,11 +264,8 @@ class StreamingApiTests(unittest.TestCase):
                     conversation_id="conversation-1",
                 ),
                 DisconnectedRequest(),
-                Settings(
-                    _env_file=None,
-                    stream_poll_interval_seconds=0.01,
-                    stream_thread_join_seconds=1,
-                ),
+                settings,
+                local_authenticated_user(settings),
                 None,
             )
             return [chunk async for chunk in response.body_iterator]

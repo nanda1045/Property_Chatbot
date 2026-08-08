@@ -7,10 +7,14 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.auth import Role
+from app.core.authorization import ToolPermission
+
 RiskLevel = Literal["read", "compute", "write"]
 ToolStatus = Literal["succeeded", "failed"]
 ToolErrorType = Literal[
     "unknown_tool",
+    "authorization_denied",
     "scope_error",
     "input_validation",
     "budget_exceeded",
@@ -26,6 +30,11 @@ TRUSTED_ARGUMENT_NAMES = frozenset(
         "property_code",
         "user_id",
         "tenant_id",
+        "role",
+        "roles",
+        "permission",
+        "permissions",
+        "allowed_property_codes",
         "database_connection",
         "approval_status",
     }
@@ -40,6 +49,8 @@ class TrustedToolContext(BaseModel):
     property_code: str | None = None
     user_id: str
     tenant_id: str | None = None
+    roles: tuple[Role, ...]
+    allowed_property_codes: tuple[str, ...]
     run_id: str | None = None
 
     @field_validator("property_code")
@@ -50,6 +61,14 @@ class TrustedToolContext(BaseModel):
         normalized = value.strip().lower()
         if not normalized:
             raise ValueError("property_code cannot be empty")
+        return normalized
+
+    @field_validator("allowed_property_codes")
+    @classmethod
+    def normalize_allowed_properties(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(sorted({item.strip().lower() for item in value if item.strip()}))
+        if not normalized:
+            raise ValueError("allowed_property_codes cannot be empty")
         return normalized
 
 
@@ -90,6 +109,7 @@ class ToolSpec:
     input_model: type[BaseModel]
     output_model: type[BaseModel]
     risk_level: RiskLevel = "read"
+    required_permission: ToolPermission = ToolPermission.PROPERTY_BASIC_READ
     timeout_seconds: float = 10.0
     max_attempts: int = 1
     idempotent: bool = True

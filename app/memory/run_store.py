@@ -29,6 +29,11 @@ OBSERVABILITY_EVENT_TYPES = frozenset(
         "run_completed",
         "run_failed",
         "run_cancelled",
+        "AUTHENTICATED",
+        "AUTHORIZATION_ALLOWED",
+        "AUTHORIZATION_DENIED",
+        "SQL_APPROVAL_AUTHORIZED",
+        "SQL_APPROVAL_DENIED",
     }
 )
 
@@ -40,6 +45,13 @@ PRIVATE_PAYLOAD_KEYS = frozenset(
         "reasoning",
         "systemprompt",
         "thoughts",
+        "accesstoken",
+        "authorizationheader",
+        "bearertoken",
+        "prompt",
+        "rawprompt",
+        "refreshtoken",
+        "token",
     }
 )
 

@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 
 ERROR_CODES = {
     400: "bad_request",
+    401: "unauthenticated",
+    403: "forbidden",
     404: "not_found",
     409: "conflict",
     422: "validation_error",

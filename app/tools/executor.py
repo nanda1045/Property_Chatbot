@@ -18,6 +18,12 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
 
+from app.core.auth import AuthenticatedUser
+from app.core.authorization import (
+    AuthorizationContext,
+    AuthorizationDeniedError,
+    authorize_tool,
+)
 from app.tools.contracts import (
     TRUSTED_ARGUMENT_NAMES,
     ToolError,
@@ -115,6 +121,57 @@ class ToolExecutor:
                 "scope_error",
                 scope_error,
             )
+
+        authorization_context = AuthorizationContext(
+            user=AuthenticatedUser(
+                user_id=context.user_id,
+                display_name=context.user_id,
+                tenant_id=context.tenant_id or "local-development",
+                roles=context.roles,
+            ),
+            allowed_property_codes=context.allowed_property_codes,
+            property_code=context.property_code,
+        )
+        role = (
+            authorization_context.primary_role.value
+            if authorization_context.primary_role is not None
+            else None
+        )
+        try:
+            authorize_tool(
+                authorization_context,
+                registered.spec,
+                require_property="property_code" in registered.spec.required_scopes,
+            )
+        except AuthorizationDeniedError as error:
+            self._emit(
+                "AUTHORIZATION_DENIED",
+                run_id=context.run_id,
+                user_id=context.user_id,
+                role=role,
+                property_code=context.property_code,
+                tool=tool_name,
+                permission=registered.spec.required_permission.value,
+                outcome="denied",
+            )
+            return self._failure(
+                invocation_id,
+                tool_name,
+                "authorization_denied",
+                str(error),
+                details={"permission": registered.spec.required_permission.value},
+            )
+
+        self._emit(
+            "AUTHORIZATION_ALLOWED",
+            run_id=context.run_id,
+            user_id=context.user_id,
+            role=role,
+            property_code=context.property_code,
+            tool=tool_name,
+            permission=registered.spec.required_permission.value,
+            outcome="allowed",
+        )
 
         untrusted_arguments = dict(arguments or {})
         supplied_trusted = sorted(TRUSTED_ARGUMENT_NAMES & untrusted_arguments.keys())
@@ -332,6 +389,7 @@ class ToolExecutor:
             "property_code": context.property_code,
             "user_id": context.user_id,
             "tenant_id": context.tenant_id,
+            "roles": sorted(role.value for role in context.roles),
             "key": idempotency_key,
         }
         serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))

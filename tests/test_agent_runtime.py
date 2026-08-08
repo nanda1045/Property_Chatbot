@@ -261,6 +261,8 @@ class AgentRuntimeTests(unittest.TestCase):
             [event["event_type"] for event in run_store.events],
             [
                 "run_created",
+                "AUTHENTICATED",
+                "AUTHORIZATION_ALLOWED",
                 "planning_started",
                 "plan_created",
                 "step_started",

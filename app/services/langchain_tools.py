@@ -6,6 +6,8 @@ from typing import Any
 from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.auth import local_authenticated_user
+from app.core.authorization import AuthorizationContext
 from app.core.config import Settings
 from app.tools.contracts import TrustedToolContext
 from app.tools.executor import ToolExecutor
@@ -59,6 +61,10 @@ def build_langchain_tools(
 ) -> list[BaseTool]:
     """Expose compatibility wrappers backed by the controlled tool executor."""
     executor = executor or ToolExecutor(build_property_tool_registry(settings))
+    authorization = AuthorizationContext.from_settings(
+        local_authenticated_user(settings),
+        settings,
+    )
 
     def execute_json(
         name: str,
@@ -70,7 +76,10 @@ def build_langchain_tools(
             arguments,
             TrustedToolContext(
                 property_code=property_code,
-                user_id=settings.runtime_user_id,
+                user_id=authorization.user.user_id,
+                tenant_id=authorization.user.tenant_id,
+                roles=authorization.user.roles,
+                allowed_property_codes=authorization.allowed_property_codes,
             ),
         )
         if result.status == "failed":

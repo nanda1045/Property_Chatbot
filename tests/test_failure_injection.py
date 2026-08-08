@@ -73,7 +73,12 @@ def injected_executor(
 
 class FailureInjectionTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.context = TrustedToolContext(property_code="115r", user_id="user-1")
+        self.context = TrustedToolContext(
+            property_code="115r",
+            user_id="user-1",
+            roles=("PropertyManager",),
+            allowed_property_codes=("*",),
+        )
 
     def test_tool_timeout_is_bounded_and_structured(self) -> None:
         def slow_handler(_input: QueryInput, _context: TrustedToolContext) -> dict:

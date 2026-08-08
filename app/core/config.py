@@ -39,9 +39,21 @@ class Settings(BaseSettings):
     embedding_cache_path: Path = Path("Data/models/sentence-transformers")
 
     default_property_code: str = "115r"
-    runtime_user_id: str = "local-user"
     default_llm_provider: str = "anthropic"
     default_llm_model: str = "claude-haiku-4-5-20251001"
+
+    auth_mode: Literal["local", "entra"] = "local"
+    local_auth_user_id: str = "local-user"
+    local_auth_display_name: str = "Local Demo User"
+    local_auth_email: str = "local-user@example.test"
+    local_auth_role: Literal["Viewer", "Analyst", "PropertyManager"] = "PropertyManager"
+    local_auth_allowed_properties: list[str] = Field(default_factory=lambda: ["*"])
+    entra_tenant_id: str | None = None
+    entra_api_audience: str | None = None
+    entra_required_scope: str = "access_as_user"
+    entra_authority_host: str = "https://login.microsoftonline.com"
+    entra_jwks_cache_seconds: int = Field(default=3600, ge=60, le=86400)
+    auth_property_access: dict[str, list[str]] = Field(default_factory=dict)
 
     agent_max_steps: int = Field(default=8, ge=1)
     agent_max_tool_calls: int = Field(default=12, ge=1)
@@ -67,7 +79,12 @@ class Settings(BaseSettings):
     def normalize_log_level(cls, value: object) -> object:
         return value.upper() if isinstance(value, str) else value
 
-    @field_validator("default_property_code", "runtime_user_id")
+    @field_validator("auth_mode", mode="before")
+    @classmethod
+    def normalize_auth_mode(cls, value: object) -> object:
+        return value.lower() if isinstance(value, str) else value
+
+    @field_validator("default_property_code", "local_auth_user_id")
     @classmethod
     def reject_blank_scope(cls, value: str) -> str:
         normalized = value.strip()
@@ -75,10 +92,65 @@ class Settings(BaseSettings):
             raise ValueError("trusted scope values cannot be blank")
         return normalized
 
+    @field_validator("entra_authority_host")
+    @classmethod
+    def validate_authority_host(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        if not normalized.startswith("https://"):
+            raise ValueError("ENTRA_AUTHORITY_HOST must use HTTPS")
+        return normalized
+
+    @field_validator("entra_required_scope")
+    @classmethod
+    def validate_required_scope(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("ENTRA_REQUIRED_SCOPE cannot be blank")
+        return normalized
+
+    @field_validator("local_auth_allowed_properties")
+    @classmethod
+    def normalize_local_properties(cls, value: list[str]) -> list[str]:
+        normalized = sorted(
+            {item.strip().lower() for item in value if item and item.strip()}
+        )
+        if not normalized:
+            raise ValueError("LOCAL_AUTH_ALLOWED_PROPERTIES cannot be empty")
+        return normalized
+
+    @field_validator("auth_property_access")
+    @classmethod
+    def normalize_property_access(
+        cls,
+        value: dict[str, list[str]],
+    ) -> dict[str, list[str]]:
+        normalized: dict[str, list[str]] = {}
+        for subject, properties in value.items():
+            subject_key = subject.strip()
+            property_codes = sorted(
+                {item.strip().lower() for item in properties if item and item.strip()}
+            )
+            if not subject_key or not property_codes:
+                raise ValueError("AUTH_PROPERTY_ACCESS entries require a subject and properties")
+            normalized[subject_key] = property_codes
+        return normalized
+
     @model_validator(mode="after")
-    def reject_production_reload(self) -> Settings:
+    def validate_deployment_security(self) -> Settings:
         if self.app_env == "production" and self.app_reload:
             raise ValueError("APP_RELOAD must be false in production")
+        if self.app_env == "production" and self.auth_mode != "entra":
+            raise ValueError("AUTH_MODE must be entra in production")
+        if self.auth_mode == "entra":
+            if not self.entra_tenant_id or not self.entra_api_audience:
+                raise ValueError(
+                    "ENTRA_TENANT_ID and ENTRA_API_AUDIENCE are required in Entra mode"
+                )
+            tenant = self.entra_tenant_id.strip().lower()
+            if tenant in {"common", "organizations", "consumers"}:
+                raise ValueError("ENTRA_TENANT_ID must identify one tenant")
+            self.entra_tenant_id = self.entra_tenant_id.strip()
+            self.entra_api_audience = self.entra_api_audience.strip()
         return self
 
 

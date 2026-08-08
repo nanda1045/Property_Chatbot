@@ -65,6 +65,19 @@ class ApprovalApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_legacy_endpoint_no_longer_accepts_client_supplied_sql(self) -> None:
+        response = self.client.post(
+            "/sql/execute",
+            json={
+                "property_code": "115r",
+                "conversation_id": "conversation-1",
+                "question": "Custom metric",
+                "sql": "SELECT client_sql_is_never_executed",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
     def test_missing_run_returns_404(self) -> None:
         class MissingRuntime:
             def __init__(self, settings) -> None:
