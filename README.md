@@ -118,7 +118,7 @@ sequenceDiagram
   alt Analyst
     Policy-->>Agent: DENIED
     Agent->>Store: Record safe denial event
-    Agent-->>UI: Permission required; no execution control
+    Agent-->>UI: Permission required - no execution control
   else PropertyManager
     Policy-->>Agent: ALLOWED
     Agent->>Store: Save SQL in scoped checkpoint
