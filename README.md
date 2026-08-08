@@ -1,35 +1,33 @@
 # Aker Property Assistant
 
-A full-stack, identity-aware property operations agent that runs bounded workflows across rent-roll data and hybrid retrieval, with least-privilege tools, human-gated SQL, durable traces, and evidence-verified answers.
+This is a personal project I built to explore how an AI assistant can work safely with property operations data. It combines structured rent-roll analytics with property website retrieval and keeps identity, authorization, property scope, tool execution, and SQL approval under backend control.
 
-## Why this project is interesting
+## Overview
 
-- **Production-shaped full stack:** React, TypeScript, MSAL, FastAPI, Pydantic, MySQL, Chroma, and BM25 work as one property analytics experience.
-- **Bounded agent orchestration:** a plan-execute-observe-decide runtime constrains steps, tools, retries, duration, repetition, and cancellation instead of giving the model an open-ended loop.
-- **Identity-aware least privilege:** Microsoft Entra identity, backend property grants, typed tool permissions, and server-injected scope stay outside model control.
-- **Human-in-the-loop SQL:** custom analytics pause at a durable checkpoint; approval is re-authorized, and only the server-stored read-only query can execute.
-- **Inspectable and evaluated:** checkpointed runs, sanitized Run Trace events, stored evidence, final verification, failure injection, and deterministic evaluations make behavior reviewable.
+The project uses React and TypeScript for the interface, FastAPI and Pydantic for the API, MySQL for structured property data, and Chroma with BM25 for hybrid retrieval. The agent follows a bounded plan-execute-observe-decide loop with limits on steps, tool calls, retries, duration, repetition, and cancellation.
+
+I added Microsoft Entra authentication, backend-enforced property grants, typed tools, human approval for custom SQL, durable checkpoints, evidence verification, and a sanitized Run Trace so I can inspect what happened during each request.
 
 ## Demo
 
-The application opens with four recruiter-friendly workflows covering retrieval, structured analytics, a hybrid investigation, and privileged SQL. Selecting one fills the composer without executing it, so the prompt can be reviewed before the run begins.
+The application starts with four example workflows covering retrieval, structured analytics, a hybrid investigation, and privileged SQL. Selecting an example fills the composer without running it, so the request can still be edited before submission.
 
 ### Property-scoped agent workspace
 
-The landing view keeps the active demo identity, authorized property, model, and enforced security controls visible beside the suggested workflows.
+The workspace keeps the active identity, property, model, and security status visible beside the example workflows.
 
 ![Aker Assistant workspace showing the Demo Analyst identity, Canfield Park property scope, security status, and example workflows](docs/demo/screenshots/01-application-overview.png)
 
 ### Evidence-grounded structured analytics
 
-The occupancy workflow returns a concise answer, evidence references, and an inline trend visualization for the authorized property.
+The occupancy workflow returns an answer with evidence references and an inline trend chart for the selected property.
 
 ![Evidence-grounded occupancy answer with a 12-month trend chart for Canfield Park](docs/demo/screenshots/02-grounded-occupancy-answer.png)
 
 <details>
 <summary><strong>Inspect the complete Run Trace</strong></summary>
 
-The trace exposes safe operational events from authentication and planning through per-tool authorization, execution, evidence verification, and completion.
+The Run Trace follows the request from authentication and planning through tool authorization, execution, evidence verification, and completion.
 
 ![Run Trace showing authentication, authorization, planning, stored evidence, and execution status](docs/demo/screenshots/03-run-trace-authentication-planning.png)
 
@@ -41,7 +39,7 @@ The trace exposes safe operational events from authentication and planning throu
 
 ### Identity-aware authorization denial
 
-The same privileged analytics request is denied for the Demo Analyst identity. The UI explains the required permission while keeping the property scope and enforced security posture visible; no SQL is exposed or executed.
+The privileged analytics request is denied for the Demo Analyst identity because the role does not have `sql.approve` permission. No SQL is exposed or executed.
 
 ![Aker Assistant denying a privileged custom SQL request for the Demo Analyst identity](docs/demo/screenshots/06-analyst-authorization-denied.png)
 
@@ -136,14 +134,14 @@ sequenceDiagram
   end
 ```
 
-In `AUTH_MODE=local`, the UI exposes three predefined demo identities through a backend-issued, HttpOnly signed selector. This is a recruiter convenience, resets when the local backend restarts, and is unavailable in Entra mode. In `AUTH_MODE=entra`, standard Microsoft Entra SPA/API authentication supplies the user and app roles; this project does **not** claim to use Microsoft Entra Agent ID. Entra role assignment and property grants still require tenant administration, and a real model key plus loaded demo data are required to generate and execute the live custom query.
+In `AUTH_MODE=local`, I can use three predefined identities through a backend-issued, HttpOnly signed selector. This lets me test role-specific behavior locally without configuring Entra; the selected identity resets when the backend restarts and the selector is unavailable in Entra mode. In `AUTH_MODE=entra`, standard Microsoft Entra SPA/API authentication supplies the user and app roles. Entra role assignment and property grants require tenant configuration, and a model key plus loaded data are required to generate and execute a live custom query.
 
 The assistant combines structured rent-roll data in MySQL with scraped public property website content. It supports runtime LLM switching, Markdown responses, streamed LLM output, property-scoped retrieval, and structured UI components such as KPI cards, charts, tables, and comparisons.
 
 ## Features
 
 - Property-scoped chat by active `property_code`.
-- Microsoft Entra ID SPA authentication with a recruiter-friendly local demo mode.
+- Microsoft Entra ID SPA authentication with a separate local development mode.
 - Backend-enforced Viewer, Analyst, and PropertyManager authorization.
 - Identity-aware property grants and tool permissions that the planner cannot override.
 - Structured rent-roll analytics from MySQL.
@@ -826,13 +824,13 @@ curl -s http://localhost:8000/chat \
 
 ## Engineering Decisions and Trade-offs
 
-These are the main interview-level design choices, including what each choice gives up:
+These are the main design choices I made and the trade-offs I accepted:
 
 | Decision | Why | Trade-off |
 | --- | --- | --- |
 | Validate Entra identity at the API boundary | A tenant-specific issuer, API audience, delegated scope, stable object ID, and app-role claims establish a deterministic identity before agent work begins. | A real tenant requires two app registrations, consent, assignments, and environment configuration. |
 | Keep authorization outside the planner | The LLM can request a registered tool, but the executor independently evaluates trusted identity, role, permission metadata, and property grants. | New tools require an explicit permission classification in addition to input/output schemas. |
-| Keep an explicit local auth mode | Recruiters can run the full repository without Azure setup while production configuration rejects the demo identity. | Local mode demonstrates the boundary but does not exercise a real Microsoft sign-in. |
+| Keep an explicit local auth mode | I can run and test the complete authorization flow without configuring Azure, while production mode rejects local identities. | Local mode exercises the authorization boundary but does not perform a real Microsoft sign-in. |
 | Use a bounded agent instead of a fully autonomous loop | Fixed budgets, typed actions, deterministic stop rules, and evidence verification make execution explainable and testable. | New task families may require a policy, tool, or planner example instead of emerging automatically. |
 | Inject trusted scope server-side | Property, user, database, and approval scope cannot safely come from model output or client-supplied tool arguments. | The backend owns more orchestration code and every new trusted dimension must be threaded through contracts. |
 | Persist checkpoints | A run can survive process restart, pause for human approval, expose status after disconnect, and produce an audit trail. | Each transition performs additional database writes and state-schema evolution must remain backward compatible. |
