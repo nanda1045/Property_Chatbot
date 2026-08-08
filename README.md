@@ -14,16 +14,43 @@ A full-stack, identity-aware property operations agent that runs bounded workflo
 
 The application opens with four recruiter-friendly workflows covering retrieval, structured analytics, a hybrid investigation, and privileged SQL. Selecting one fills the composer without executing it, so the prompt can be reviewed before the run begins.
 
-No screenshots or recordings are currently committed. Capture these assets from a real local run and place them at the paths below—do not use mock data or fabricated UI:
+### Property-scoped agent workspace
 
-| Capture | Target location | What to show |
-| --- | --- | --- |
-| Application overview | `docs/demo/application-overview.png` | Signed-in identity, active role/property, enforced-status area, and example workflows |
-| Agent Run Trace | `docs/demo/run-trace.png` | Authentication, authorization, planning, tool execution, stored evidence, verification, duration, and final status |
-| SQL approval | `docs/demo/sql-approval.png` | Checkpointed SQL proposal and explicit human approval control; use redacted/demo data only |
-| Optional 30–60 second recording | `docs/demo/agent-workflow.gif` or a hosted video link | Prompt selection → bounded execution → evidence-grounded answer → expanded Run Trace |
+The landing view keeps the active demo identity, authorized property, model, and enforced security controls visible beside the suggested workflows.
 
-After capture, add the first three images here with descriptive alt text and link the optional video from this section.
+![Aker Assistant workspace showing the Demo Analyst identity, Canfield Park property scope, security status, and example workflows](docs/demo/screenshots/01-application-overview.png)
+
+### Evidence-grounded structured analytics
+
+The occupancy workflow returns a concise answer, evidence references, and an inline trend visualization for the authorized property.
+
+![Evidence-grounded occupancy answer with a 12-month trend chart for Canfield Park](docs/demo/screenshots/02-grounded-occupancy-answer.png)
+
+<details>
+<summary><strong>Inspect the complete Run Trace</strong></summary>
+
+The trace exposes safe operational events from authentication and planning through per-tool authorization, execution, evidence verification, and completion.
+
+![Run Trace showing authentication, authorization, planning, stored evidence, and execution status](docs/demo/screenshots/03-run-trace-authentication-planning.png)
+
+![Run Trace showing per-tool authorization and successful property-scoped tool execution](docs/demo/screenshots/04-run-trace-tool-authorization.png)
+
+![Run Trace showing analytics authorization, occupancy retrieval, evidence verification, and run completion](docs/demo/screenshots/05-run-trace-verification-completion.png)
+
+</details>
+
+### Identity-aware authorization denial
+
+The same privileged analytics request is denied for the Demo Analyst identity. The UI explains the required permission while keeping the property scope and enforced security posture visible; no SQL is exposed or executed.
+
+![Aker Assistant denying a privileged custom SQL request for the Demo Analyst identity](docs/demo/screenshots/06-analyst-authorization-denied.png)
+
+<details>
+<summary><strong>View the authorization decision in detail</strong></summary>
+
+![Authorization denied card showing the Analyst role, PropertyManager requirement, risk level, and backend-enforced property scope](docs/demo/screenshots/07-authorization-denied-detail.png)
+
+</details>
 
 ## Architecture at a glance
 
