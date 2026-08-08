@@ -8,13 +8,21 @@ from typing import Annotated
 from uuid import uuid4
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from app.agents.cancellation import AgentRunCancelledError
 from app.agents.runtime import AgentRunConflictError, AgentRunNotFoundError, AgentRuntime
-from app.core.auth import AuthenticatedUser, AuthenticatedUserDep
+from app.core.auth import (
+    LOCAL_DEMO_IDENTITY_COOKIE,
+    LOCAL_DEMO_IDENTITY_TTL_SECONDS,
+    AuthenticatedUser,
+    AuthenticatedUserDep,
+    Role,
+    issue_local_demo_identity_token,
+    local_demo_authenticated_user,
+)
 from app.core.authorization import (
     AuthorizationContext,
     AuthorizationDeniedError,
@@ -37,6 +45,7 @@ from app.schemas import (
     AgentRunStep,
     ChatRequest,
     ChatResponse,
+    DemoIdentityRequest,
     SqlApprovalRequest,
 )
 from app.services.conversation_memory import ConversationMemory
@@ -108,8 +117,7 @@ def readiness(settings: SettingsDep) -> dict[str, object]:
     }
 
 
-@app.get("/auth/me")
-def authenticated_identity(user: AuthenticatedUserDep) -> dict[str, object]:
+def _identity_payload(user: AuthenticatedUser) -> dict[str, object]:
     return {
         "user_id": user.user_id,
         "display_name": user.display_name,
@@ -118,6 +126,34 @@ def authenticated_identity(user: AuthenticatedUserDep) -> dict[str, object]:
         "roles": [role.value for role in user.roles],
         "role": user.primary_role.value if user.primary_role is not None else None,
     }
+
+
+@app.get("/auth/me")
+def authenticated_identity(user: AuthenticatedUserDep) -> dict[str, object]:
+    return _identity_payload(user)
+
+
+@app.post("/auth/demo-identity")
+def select_demo_identity(
+    request: DemoIdentityRequest,
+    response: Response,
+    settings: SettingsDep,
+    _rate_limit: RateLimitDep,
+) -> dict[str, object]:
+    """Select a predefined backend-owned identity in local demo mode only."""
+    if settings.auth_mode != "local":
+        raise HTTPException(status_code=404, detail="Local demo identity switching is unavailable")
+    role = Role(request.role)
+    response.set_cookie(
+        key=LOCAL_DEMO_IDENTITY_COOKIE,
+        value=issue_local_demo_identity_token(role),
+        max_age=LOCAL_DEMO_IDENTITY_TTL_SECONDS,
+        httponly=True,
+        secure=False,
+        samesite="strict",
+        path="/",
+    )
+    return _identity_payload(local_demo_authenticated_user(role))
 
 
 @app.get("/models")

@@ -36,6 +36,7 @@ import {
 import type {
   ChatResponse,
   ChatTurn,
+  DemoRole,
   ModelOption,
   PropertyOption,
   UIComponent
@@ -57,7 +58,8 @@ const STARTER_WORKFLOWS = [
   },
   {
     label: "Privileged action",
-    question: "Calculate a custom rent-roll metric that requires SQL."
+    question:
+      "Calculate the average outstanding balance for occupied units with balances above the property's overall average."
   }
 ];
 
@@ -98,7 +100,7 @@ function getInitialConversationId() {
 }
 
 function AuthenticatedApp() {
-  const { mode: authMode, user, signOut } = useAuth();
+  const { mode: authMode, user, signOut, switchDemoIdentity } = useAuth();
   const [models, setModels] = useState<ModelOption[]>([]);
   const [properties, setProperties] = useState<PropertyOption[]>([]);
   const [model, setModel] = useState(DEFAULT_MODEL_ID);
@@ -319,7 +321,11 @@ function AuthenticatedApp() {
     await submitQuestion(message);
   }
 
-  async function handleSqlApproval(turnId: string, component: UIComponent) {
+  async function handleSqlApproval(
+    turnId: string,
+    component: UIComponent,
+    approved: boolean
+  ) {
     const data = component.data;
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       return;
@@ -339,7 +345,8 @@ function AuthenticatedApp() {
       const response = await approveAgentRun({
         runId,
         propertyCode: approvedPropertyCode,
-        conversationId
+        conversationId,
+        approved
       });
       setTurns((current) =>
         current.map((turn) =>
@@ -365,7 +372,7 @@ function AuthenticatedApp() {
           turn.id === turnId
             ? {
                 ...turn,
-                error: error instanceof Error ? error.message : "SQL approval failed."
+                error: error instanceof Error ? error.message : "SQL decision failed."
               }
             : turn
         )
@@ -416,6 +423,23 @@ function AuthenticatedApp() {
               </button>
             ) : null}
           </section>
+        ) : null}
+
+        {authMode === "local" && user && switchDemoIdentity ? (
+          <label className="demo-identity-switcher">
+            <span>Local demo identity</span>
+            <select
+              value={user.role ?? "Viewer"}
+              onChange={(event) =>
+                void switchDemoIdentity(event.target.value as DemoRole)
+              }
+            >
+              <option value="Viewer">Demo Viewer</option>
+              <option value="Analyst">Demo Analyst</option>
+              <option value="PropertyManager">Demo Property Manager</option>
+            </select>
+            <small>Local mode only • backend-issued identity</small>
+          </label>
         ) : null}
 
         <div className="control-card">
@@ -586,7 +610,10 @@ function AuthenticatedApp() {
                             key={`${component.type}-${component.title}-${index}`}
                             component={component}
                             onApprove={(approvalComponent) =>
-                              void handleSqlApproval(turn.id, approvalComponent)
+                              void handleSqlApproval(turn.id, approvalComponent, true)
+                            }
+                            onReject={(approvalComponent) =>
+                              void handleSqlApproval(turn.id, approvalComponent, false)
                             }
                           />
                         ))}

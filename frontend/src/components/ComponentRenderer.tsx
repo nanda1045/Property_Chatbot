@@ -10,6 +10,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
+import { AlertTriangle, CheckCircle2, ShieldCheck, XCircle } from "lucide-react";
 
 import type { UIComponent } from "../types";
 
@@ -375,31 +376,111 @@ function ComparisonPanel({ component }: { component: UIComponent }) {
 
 function SqlApprovalPanel({
   component,
-  onApprove
+  onApprove,
+  onReject
 }: {
   component: UIComponent;
   onApprove?: (component: UIComponent) => void;
+  onReject?: (component: UIComponent) => void;
 }) {
   const data = isRecord(component.data) ? component.data : {};
   const sql = typeof data.sql === "string" ? data.sql : "";
   const explanation = typeof data.explanation === "string" ? data.explanation : component.description;
   const status = typeof data.status === "string" ? data.status : "pending_approval";
   const executable = data.executable !== false;
+  const authorization = data.authorization === "denied" ? "denied" : "allowed";
+  const requestedAction =
+    typeof data.requested_action === "string" ? data.requested_action : "Custom SQL analysis";
+  const property = typeof data.property_code === "string" ? data.property_code.toUpperCase() : "—";
+  const requiredRole =
+    typeof data.required_role === "string" ? data.required_role : "PropertyManager";
+  const requiredPermission =
+    typeof data.required_permission === "string" ? data.required_permission : "sql.approve";
+  const currentRole = typeof data.current_role === "string" ? data.current_role : "—";
+  const riskLevel =
+    typeof data.risk_level === "string" ? data.risk_level : "Privileged read-only SQL";
+  const authorizationMessage =
+    typeof data.authorization_message === "string"
+      ? data.authorization_message
+      : "Human approval is required before execution.";
 
   return (
-    <section className="component-panel sql-approval-panel">
+    <section className={`component-panel sql-approval-panel sql-approval-${authorization}`}>
       <div className="component-heading">
-        <h3>{component.title}</h3>
+        <span className="sql-approval-eyebrow">
+          <ShieldCheck aria-hidden="true" />
+          Identity-aware authorization
+        </span>
+        <h3>Custom SQL Analysis</h3>
         {explanation ? <p>{explanation}</p> : null}
       </div>
-      <p>
-        <strong>Status:</strong> {formatColumnName(status)}
-      </p>
-      <pre>{sql}</pre>
-      {executable ? (
-        <button type="button" onClick={() => onApprove?.(component)} disabled={!sql || !onApprove}>
-          Run approved query
-        </button>
+
+      <div className={`sql-authorization-banner sql-authorization-${authorization}`}>
+        {authorization === "allowed" ? (
+          <CheckCircle2 aria-hidden="true" />
+        ) : (
+          <XCircle aria-hidden="true" />
+        )}
+        <span>
+          <strong>Authorization: {authorization.toUpperCase()}</strong>
+          <small>{authorizationMessage}</small>
+        </span>
+      </div>
+
+      <dl className="sql-approval-facts">
+        <div>
+          <dt>Requested action</dt>
+          <dd>{requestedAction}</dd>
+        </div>
+        <div>
+          <dt>Risk level</dt>
+          <dd><AlertTriangle aria-hidden="true" /> {riskLevel}</dd>
+        </div>
+        <div>
+          <dt>Required permission</dt>
+          <dd>{requiredRole} <code>{requiredPermission}</code></dd>
+        </div>
+        <div>
+          <dt>Current role</dt>
+          <dd>{currentRole}</dd>
+        </div>
+        <div>
+          <dt>Property scope</dt>
+          <dd>{property} • backend enforced</dd>
+        </div>
+        <div>
+          <dt>Workflow status</dt>
+          <dd>{formatColumnName(status)}</dd>
+        </div>
+      </dl>
+
+      {sql && authorization === "allowed" ? (
+        <details className="sql-draft-review">
+          <summary>Review validated SQL draft</summary>
+          <pre>{sql}</pre>
+          <small>The server will reload this checkpointed draft and bind the property scope.</small>
+        </details>
+      ) : null}
+
+      {executable && authorization === "allowed" ? (
+        <div className="sql-approval-actions">
+          <button
+            type="button"
+            className="sql-reject"
+            onClick={() => onReject?.(component)}
+            disabled={!onReject}
+          >
+            Reject
+          </button>
+          <button
+            type="button"
+            className="sql-approve"
+            onClick={() => onApprove?.(component)}
+            disabled={!sql || !onApprove}
+          >
+            Approve &amp; Run
+          </button>
+        </div>
       ) : null}
     </section>
   );
@@ -416,10 +497,12 @@ function JsonPanel({ component }: { component: UIComponent }) {
 
 export function ComponentRenderer({
   component,
-  onApprove
+  onApprove,
+  onReject
 }: {
   component: UIComponent;
   onApprove?: (component: UIComponent) => void;
+  onReject?: (component: UIComponent) => void;
 }) {
   switch (component.type) {
     case "kpi_card":
@@ -433,7 +516,9 @@ export function ComponentRenderer({
     case "comparison_view":
       return <ComparisonPanel component={component} />;
     case "sql_approval":
-      return <SqlApprovalPanel component={component} onApprove={onApprove} />;
+      return (
+        <SqlApprovalPanel component={component} onApprove={onApprove} onReject={onReject} />
+      );
     default:
       return <JsonPanel component={component} />;
   }

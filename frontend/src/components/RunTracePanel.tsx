@@ -37,7 +37,9 @@ const EVENT_LABELS: Record<string, string> = {
   tool_retried: "Tool execution retried",
   approval_requested: "SQL approval required",
   approval_received: "SQL approval decision received",
+  evidence_recorded: "Execution evidence recorded",
   verification_started: "Evidence verification started",
+  verification_succeeded: "Evidence verified",
   verification_failed: "Evidence verification failed",
   run_completed: "Run completed",
   run_failed: "Run failed",
@@ -66,6 +68,9 @@ function eventIcon(event: AgentRunEvent) {
   }
   if (eventType.includes("approval")) {
     return <ShieldCheck aria-hidden="true" />;
+  }
+  if (eventType.includes("evidence")) {
+    return <BookOpenCheck aria-hidden="true" />;
   }
   if (eventType.includes("verification")) {
     return <DatabaseZap aria-hidden="true" />;
@@ -140,6 +145,9 @@ function eventCategory(event: AgentRunEvent) {
   if (eventType.includes("approval")) {
     return "Human approval";
   }
+  if (eventType.includes("evidence")) {
+    return "Evidence";
+  }
   if (eventType.includes("tool") || event.tool_name) {
     return event.tool_name === "execute_approved_sql" ? "SQL execution" : "Tool execution";
   }
@@ -164,7 +172,9 @@ function safeEventMetadata(event: AgentRunEvent) {
     ["Role", "role"],
     ["Status", "status"],
     ["Step", "step_type"],
-    ["Reason", "reason"]
+    ["Reason", "reason"],
+    ["Phase", "authorization_phase"],
+    ["Evidence", "evidence_type"]
   ];
 
   for (const [label, key] of scalarFields) {
@@ -181,6 +191,10 @@ function safeEventMetadata(event: AgentRunEvent) {
     if (typeof count === "number") {
       entries.push(["Records", String(count)]);
     }
+  }
+  const rowCount = event.payload.row_count;
+  if (typeof rowCount === "number") {
+    entries.push(["Records", String(rowCount)]);
   }
 
   return entries;

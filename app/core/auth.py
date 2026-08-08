@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Any
 from urllib.request import urlopen
 
 import jwt
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -30,6 +32,11 @@ ROLE_ORDER = {
     Role.ANALYST: 1,
     Role.PROPERTY_MANAGER: 2,
 }
+
+LOCAL_DEMO_IDENTITY_COOKIE = "aker_local_demo_identity"
+LOCAL_DEMO_IDENTITY_TTL_SECONDS = 12 * 60 * 60
+_LOCAL_DEMO_ISSUER = "aker-local-demo"
+_LOCAL_DEMO_SIGNING_KEY = secrets.token_bytes(32)
 
 
 class AuthenticatedUser(BaseModel):
@@ -162,6 +169,52 @@ def local_authenticated_user(settings: Settings) -> AuthenticatedUser:
     )
 
 
+def local_demo_authenticated_user(role: Role) -> AuthenticatedUser:
+    """Return one of the backend-owned identities exposed only in local demo mode."""
+    label = "Property Manager" if role is Role.PROPERTY_MANAGER else role.value
+    slug = role.value.lower()
+    return AuthenticatedUser(
+        user_id=f"local-demo-{slug}",
+        display_name=f"Demo {label}",
+        email=f"demo-{slug}@example.test",
+        tenant_id="local-development",
+        roles=(role,),
+    )
+
+
+def issue_local_demo_identity_token(role: Role) -> str:
+    """Issue an opaque-to-the-UI signed selector for a predefined local identity."""
+    issued_at = datetime.now(UTC)
+    return jwt.encode(
+        {
+            "iss": _LOCAL_DEMO_ISSUER,
+            "aud": _LOCAL_DEMO_ISSUER,
+            "iat": issued_at,
+            "exp": issued_at + timedelta(seconds=LOCAL_DEMO_IDENTITY_TTL_SECONDS),
+            "role": role.value,
+        },
+        _LOCAL_DEMO_SIGNING_KEY,
+        algorithm="HS256",
+    )
+
+
+def local_demo_user_from_token(token: str) -> AuthenticatedUser:
+    """Verify a server-issued local selector; invalid selectors fail closed to Viewer."""
+    try:
+        claims = jwt.decode(
+            token,
+            _LOCAL_DEMO_SIGNING_KEY,
+            algorithms=["HS256"],
+            audience=_LOCAL_DEMO_ISSUER,
+            issuer=_LOCAL_DEMO_ISSUER,
+            options={"require": ["iss", "aud", "iat", "exp", "role"]},
+        )
+        role = Role(str(claims["role"]))
+    except Exception:
+        role = Role.VIEWER
+    return local_demo_authenticated_user(role)
+
+
 @lru_cache(maxsize=16)
 def _cached_entra_validator(
     tenant_id: str,
@@ -195,10 +248,14 @@ _BEARER = HTTPBearer(auto_error=False)
 
 
 def get_authenticated_user(
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     credentials: Annotated[HTTPAuthorizationCredentials | None, Security(_BEARER)],
 ) -> AuthenticatedUser:
     if settings.auth_mode == "local":
+        demo_token = request.cookies.get(LOCAL_DEMO_IDENTITY_COOKIE)
+        if demo_token:
+            return local_demo_user_from_token(demo_token)
         return local_authenticated_user(settings)
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(

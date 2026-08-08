@@ -181,6 +181,8 @@ CUSTOM_SQL_PATTERNS = [
     r"\blowest market rents?\b",
 
     # Balance queries not covered by top_balances safe tool
+    r"\baverage (?:outstanding )?balance\b",
+    r"\bavg (?:outstanding )?balance\b",
     r"\baverage balance by\b",
     r"\bavg balance by\b",
     r"\bmedian balance by\b",

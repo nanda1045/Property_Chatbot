@@ -13,6 +13,8 @@ export type AuthenticatedUser = {
   role?: string | null;
 };
 
+export type DemoRole = "Viewer" | "Analyst" | "PropertyManager";
+
 export type PropertyOption = {
   property_code: string;
   property_name: string;

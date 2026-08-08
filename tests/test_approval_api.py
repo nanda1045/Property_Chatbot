@@ -65,6 +65,21 @@ class ApprovalApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_approval_endpoint_rejects_spoofed_role_and_identity(self) -> None:
+        response = self.client.post(
+            "/api/agent-runs/run-1/approve",
+            json={
+                "property_code": "115r",
+                "conversation_id": "conversation-1",
+                "approved": True,
+                "role": "PropertyManager",
+                "user_id": "attacker",
+                "authorization": "allowed",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
     def test_legacy_endpoint_no_longer_accepts_client_supplied_sql(self) -> None:
         response = self.client.post(
             "/sql/execute",

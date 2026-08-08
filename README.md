@@ -66,6 +66,51 @@ The model can propose a plan or tool call, but authentication, property scope, p
 7. Step, tool-call, retry, repetition, approval, duration, queue, and cancellation limits bound execution and failure recovery.
 8. Operational traces expose statuses and safe metadata, never hidden chain-of-thought, private prompts, bearer tokens, secrets, or raw SQL outside the intentional approval UI.
 
+## Identity-Aware Agent Authorization Demo
+
+Use this request for both identities:
+
+> Calculate the average outstanding balance for occupied units with balances above the property's overall average.
+
+- **Demo Analyst:** the agent may formulate a safety-validated custom analysis, but the backend denies `sql.approve`. The UI shows `Authorization: DENIED`, the trace records the effective Analyst role and denial, no SQL is returned for approval, and nothing executes.
+- **Demo Property Manager:** the same request passes the initial backend permission check and displays a human approval card. On approval, the backend checks the current identity again, loads the server-checkpointed SQL, binds `property_code`, executes once, stores the result evidence, verifies it, and completes the run.
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant UI as React UI
+  participant API as FastAPI
+  participant Agent as Bounded Agent
+  participant Policy as Authorization Policy
+  participant Store as Checkpoint Store
+  participant DB as MySQL
+
+  User->>UI: Submit the custom analysis request
+  UI->>API: message + property_code
+  API->>Agent: trusted identity + authorized property scope
+  Agent->>Agent: Plan and validate read-only SQL draft
+  Agent->>Policy: Check sql.approve for effective role
+  alt Analyst
+    Policy-->>Agent: DENIED
+    Agent->>Store: Record safe denial event
+    Agent-->>UI: Permission required; no execution control
+  else PropertyManager
+    Policy-->>Agent: ALLOWED
+    Agent->>Store: Save SQL in scoped checkpoint
+    Agent-->>UI: Human approval card
+    User->>API: Approve run_id + property scope
+    API->>Policy: Recheck current identity and permission
+    Policy-->>API: ALLOWED
+    API->>Store: Load server-stored SQL
+    API->>DB: Execute with server-bound property_code
+    DB-->>API: Scoped result evidence
+    API->>Store: Record approval, execution, evidence, verification
+    API-->>UI: Grounded result + completed Run Trace
+  end
+```
+
+In `AUTH_MODE=local`, the UI exposes three predefined demo identities through a backend-issued, HttpOnly signed selector. This is a recruiter convenience, resets when the local backend restarts, and is unavailable in Entra mode. In `AUTH_MODE=entra`, standard Microsoft Entra SPA/API authentication supplies the user and app roles; this project does **not** claim to use Microsoft Entra Agent ID. Entra role assignment and property grants still require tenant administration, and a real model key plus loaded demo data are required to generate and execute the live custom query.
+
 The assistant combines structured rent-roll data in MySQL with scraped public property website content. It supports runtime LLM switching, Markdown responses, streamed LLM output, property-scoped retrieval, and structured UI components such as KPI cards, charts, tables, and comparisons.
 
 ## Features

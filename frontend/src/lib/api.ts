@@ -21,6 +21,7 @@ export function setAccessTokenProvider(provider: AccessTokenProvider) {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const accessToken = await accessTokenProvider();
   const response = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
@@ -39,6 +40,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function getAuthenticatedUser(): Promise<AuthenticatedUser> {
   return request("/auth/me");
+}
+
+export async function selectDemoIdentity(
+  role: "Viewer" | "Analyst" | "PropertyManager"
+): Promise<AuthenticatedUser> {
+  return request("/auth/demo-identity", {
+    method: "POST",
+    body: JSON.stringify({ role })
+  });
 }
 
 export async function getModels(): Promise<{ models: ModelOption[]; default: string }> {
@@ -70,13 +80,14 @@ export async function approveAgentRun(params: {
   runId: string;
   propertyCode: string;
   conversationId?: string;
+  approved?: boolean;
 }): Promise<ChatResponse> {
   return request(`/api/agent-runs/${encodeURIComponent(params.runId)}/approve`, {
     method: "POST",
     body: JSON.stringify({
       property_code: params.propertyCode,
       conversation_id: params.conversationId,
-      approved: true
+      approved: params.approved ?? true
     })
   });
 }
@@ -169,6 +180,7 @@ export async function sendChatStream(
   const accessToken = await accessTokenProvider();
   const response = await fetch(`${API_BASE}/chat/stream`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})

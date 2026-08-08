@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, ConfigDict
 
-from app.agents.runtime import AgentRuntime
+from app.agents.runtime import AgentRunNotFoundError, AgentRuntime
 from app.core.auth import (
     AuthenticatedUser,
     AuthenticationError,
@@ -134,6 +134,43 @@ class AuthenticationApiTests(unittest.TestCase):
         self.assertEqual(response.json()["user_id"], "local-user")
         self.assertEqual(response.json()["role"], "PropertyManager")
 
+    def test_local_demo_identity_switch_is_backend_issued_and_deterministic(self) -> None:
+        app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
+        selected = self.client.post(
+            "/auth/demo-identity",
+            json={"role": "Analyst"},
+        )
+        self.assertEqual(selected.status_code, 200)
+        self.assertEqual(selected.json()["user_id"], "local-demo-analyst")
+        self.assertEqual(selected.json()["display_name"], "Demo Analyst")
+        self.assertEqual(selected.json()["role"], "Analyst")
+        self.assertIn("HttpOnly", selected.headers["set-cookie"])
+
+        current = self.client.get("/auth/me")
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(current.json()["user_id"], "local-demo-analyst")
+        self.assertEqual(current.json()["role"], "Analyst")
+
+    def test_local_demo_identity_switch_rejects_extra_trusted_state(self) -> None:
+        app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
+        response = self.client.post(
+            "/auth/demo-identity",
+            json={
+                "role": "Analyst",
+                "user_id": "attacker",
+                "property_permissions": ["*"],
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_local_demo_identity_switch_is_unavailable_in_entra_mode(self) -> None:
+        app.dependency_overrides[get_settings] = lambda: self.entra_settings
+        response = self.client.post(
+            "/auth/demo-identity",
+            json={"role": "PropertyManager"},
+        )
+        self.assertEqual(response.status_code, 404)
+
     def test_unauthorized_property_is_rejected_before_agent_execution(self) -> None:
         app.dependency_overrides[get_settings] = lambda: self.entra_settings
         app.dependency_overrides[get_authenticated_user] = lambda: user_for(Role.VIEWER)
@@ -241,11 +278,25 @@ class ToolAuthorizationTests(unittest.TestCase):
         )
         result = ToolExecutor(registry).execute(
             "secured_tool",
-            {"user_id": "attacker", "roles": ["PropertyManager"]},
+            {
+                "user_id": "attacker",
+                "role": "PropertyManager",
+                "roles": ["PropertyManager"],
+            },
             tool_context(Role.VIEWER, user_id="trusted-user"),
         )
         self.assertEqual(result.status, "succeeded")
         self.assertEqual(captured["user_id"], "trusted-user")
+
+    def test_llm_cannot_invent_execute_sql_or_elevate_with_role_argument(self) -> None:
+        result = executor_for(ToolPermission.RETRIEVAL_READ).execute(
+            "execute_sql",
+            {"role": "PropertyManager"},
+            tool_context(Role.VIEWER, user_id="trusted-viewer"),
+        )
+        self.assertEqual(result.status, "failed")
+        self.assertIsNotNone(result.error)
+        self.assertEqual(result.error.type, "unknown_tool")
 
     def test_tool_arguments_cannot_override_property_scope(self) -> None:
         captured: dict[str, object] = {}
@@ -333,6 +384,70 @@ class SqlApprovalAuthorizationTests(unittest.TestCase):
         with self.assertRaises(AuthorizationDeniedError):
             self._resolve_as(Role.ANALYST)
 
+    def test_analyst_reaches_validated_sql_path_but_receives_denied_card(self) -> None:
+        question = (
+            "Calculate the average outstanding balance for occupied units with balances "
+            "above the property's overall average."
+        )
+        response = ChatResponse(
+            property_code="115r",
+            model="mock:test",
+            answer_markdown="A validated draft is ready.",
+            components=[
+                {
+                    "type": "sql_approval",
+                    "title": "Review SQL",
+                    "data": {
+                        "sql": "SELECT server_validated_sql",
+                        "question": question,
+                        "model": "mock:test",
+                        "status": "pending_approval",
+                    },
+                }
+            ],
+            tool_results={"sql_draft": {"sql": "SELECT server_validated_sql"}},
+        )
+        store = RecordingRunStore()
+        runtime = AgentRuntime(
+            Settings(_env_file=None),
+            workflow_factory=lambda _: FakeWorkflow(response),
+            run_store_factory=lambda _: store,
+        )
+
+        denied = runtime.answer(
+            property_code="115r",
+            message=question,
+            model="mock:test",
+            conversation_id="conversation-analyst",
+            authorization_context=authorization_for(
+                Role.ANALYST,
+                user_id="analyst-user",
+            ),
+        )
+
+        card = denied.components[0].data
+        self.assertEqual(denied.run_status, "completed")
+        self.assertEqual(card["authorization"], "denied")
+        self.assertEqual(card["current_role"], "Analyst")
+        self.assertEqual(card["required_role"], "PropertyManager")
+        self.assertFalse(card["executable"])
+        self.assertNotIn("sql", card)
+        self.assertNotIn("sql_draft", denied.tool_results)
+        self.assertIn("requires PropertyManager permission", denied.answer_markdown)
+        self.assertIsNone(store.saved[-1]["pending_approval"])
+        self.assertFalse(
+            any(event.get("tool_name") == "execute_approved_sql" for event in store.events)
+        )
+        event_types = [event["event_type"] for event in store.events]
+        self.assertIn("approval_requested", event_types)
+        self.assertIn("SQL_APPROVAL_DENIED", event_types)
+        denial = next(
+            event for event in store.events if event["event_type"] == "SQL_APPROVAL_DENIED"
+        )
+        self.assertEqual(denial["payload"]["role"], "Analyst")
+        self.assertEqual(denial["payload"]["permission"], "sql.approve")
+        self.assertEqual(denial["payload"]["outcome"], "denied")
+
     def test_property_manager_can_approve_server_stored_sql(self) -> None:
         calls: list[str] = []
 
@@ -340,9 +455,14 @@ class SqlApprovalAuthorizationTests(unittest.TestCase):
             calls.append(sql)
             return sql, [{"result": 1}]
 
-        _store, response = self._resolve_as(Role.PROPERTY_MANAGER, execute_sql=execute_sql)
+        store, response = self._resolve_as(Role.PROPERTY_MANAGER, execute_sql=execute_sql)
         self.assertEqual(response.run_status, "completed")
         self.assertEqual(calls, ["SELECT stored_sql"])
+        event_types = [event["event_type"] for event in store.events]
+        self.assertIn("SQL_APPROVAL_AUTHORIZED", event_types)
+        self.assertIn("approval_received", event_types)
+        self.assertIn("evidence_recorded", event_types)
+        self.assertIn("verification_succeeded", event_types)
 
     def test_approval_authorization_is_rechecked_at_decision_time(self) -> None:
         calls: list[str] = []
@@ -350,6 +470,49 @@ class SqlApprovalAuthorizationTests(unittest.TestCase):
             self._resolve_as(
                 Role.ANALYST,
                 execute_sql=lambda _settings, sql, _property: (calls.append(sql) or sql, []),
+            )
+        self.assertEqual(calls, [])
+
+    def test_approval_rechecks_actor_identity(self) -> None:
+        settings, store, waiting = self._waiting_run(user_id="original-manager")
+        calls: list[str] = []
+        runtime = AgentRuntime(
+            settings,
+            run_store_factory=lambda _: store,
+            sql_executor=lambda _settings, sql, _property: (calls.append(sql) or sql, []),
+        )
+        with self.assertRaises(AgentRunNotFoundError):
+            runtime.resolve_sql_approval(
+                run_id=str(waiting.run_id),
+                property_code="115r",
+                approved=True,
+                conversation_id="conversation-1",
+                authorization_context=authorization_for(
+                    Role.PROPERTY_MANAGER,
+                    user_id="different-manager",
+                ),
+            )
+        self.assertEqual(calls, [])
+
+    def test_property_scope_cannot_change_during_approval(self) -> None:
+        settings, store, waiting = self._waiting_run()
+        calls: list[str] = []
+        runtime = AgentRuntime(
+            settings,
+            run_store_factory=lambda _: store,
+            sql_executor=lambda _settings, sql, _property: (calls.append(sql) or sql, []),
+        )
+        with self.assertRaises(AgentRunNotFoundError):
+            runtime.resolve_sql_approval(
+                run_id=str(waiting.run_id),
+                property_code="176r",
+                approved=True,
+                conversation_id="conversation-1",
+                authorization_context=authorization_for(
+                    Role.PROPERTY_MANAGER,
+                    user_id="approval-user",
+                    properties=("115r", "176r"),
+                ).for_property("176r"),
             )
         self.assertEqual(calls, [])
 

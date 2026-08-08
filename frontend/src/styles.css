@@ -158,6 +158,27 @@ a {
   width: 17px;
 }
 
+.demo-identity-switcher {
+  background: rgba(142, 210, 165, 0.08);
+  border: 1px solid rgba(142, 210, 165, 0.24);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.demo-identity-switcher > span {
+  color: #8ed2a5;
+}
+
+.demo-identity-switcher select {
+  border-color: rgba(142, 210, 165, 0.42);
+  min-height: 38px;
+}
+
+.demo-identity-switcher small {
+  color: #aebdb7;
+  font-size: 10px;
+}
+
 .auth-gate {
   align-items: center;
   background: #f4f6f3;
@@ -757,21 +778,174 @@ table {
   white-space: pre-wrap;
 }
 
-.sql-approval-panel button {
-  align-self: center;
-  background: #2f7d64;
-  border: 0;
-  border-radius: 8px;
-  color: #ffffff;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-  justify-self: center;
-  padding: 8px 12px;
-  width: fit-content;
+.sql-approval-panel {
+  border-left: 4px solid #2f7d64;
 }
 
-.sql-approval-panel button:disabled {
+.sql-approval-denied {
+  border-left-color: #a04438;
+}
+
+.sql-approval-eyebrow {
+  align-items: center;
+  color: #2f7d64;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 900;
+  gap: 6px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sql-approval-eyebrow svg {
+  height: 14px;
+  width: 14px;
+}
+
+.sql-authorization-banner {
+  align-items: center;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  padding: 11px 12px;
+}
+
+.sql-authorization-banner > svg {
+  height: 20px;
+  width: 20px;
+}
+
+.sql-authorization-banner span {
+  display: grid;
+  gap: 2px;
+}
+
+.sql-authorization-banner strong {
+  font-size: 12px;
+}
+
+.sql-authorization-banner small {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.sql-authorization-allowed {
+  background: #edf7f0;
+  border: 1px solid #b9dcc4;
+  color: #235f43;
+}
+
+.sql-authorization-denied {
+  background: #fff1ef;
+  border: 1px solid #e5b5ae;
+  color: #8d382f;
+}
+
+.sql-approval-facts {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.sql-approval-facts > div {
+  background: #f6f8f6;
+  border: 1px solid #e1e7e2;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+}
+
+.sql-approval-facts > div:first-child {
+  grid-column: 1 / -1;
+}
+
+.sql-approval-facts dt {
+  color: #6d7a74;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.sql-approval-facts dd {
+  align-items: center;
+  color: #293632;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 5px;
+  margin: 0;
+}
+
+.sql-approval-facts dd svg {
+  color: #9a6d20;
+  height: 13px;
+  width: 13px;
+}
+
+.sql-approval-facts code {
+  background: #e8eeea;
+  border-radius: 999px;
+  color: #435b50;
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
+.sql-draft-review {
+  border-top: 1px solid #e1e7e2;
+  padding-top: 12px;
+}
+
+.sql-draft-review > summary {
+  color: #315f4e;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.sql-draft-review pre {
+  margin-top: 10px;
+}
+
+.sql-draft-review > small {
+  color: #65736c;
+  display: block;
+  font-size: 10px;
+  margin-top: 7px;
+}
+
+.sql-approval-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.sql-approval-actions button {
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 38px;
+  padding: 0 13px;
+}
+
+.sql-approval-actions .sql-reject {
+  background: #ffffff;
+  border: 1px solid #d4aaa4;
+  color: #8d382f;
+}
+
+.sql-approval-actions .sql-approve {
+  background: #2f7d64;
+  border: 1px solid #2f7d64;
+  color: #ffffff;
+}
+
+.sql-approval-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -1611,6 +1785,14 @@ th {
 
   .chart-frame {
     height: 260px;
+  }
+
+  .sql-approval-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .sql-approval-facts > div:first-child {
+    grid-column: auto;
   }
 
   .trace-overview {

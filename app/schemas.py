@@ -24,6 +24,12 @@ class ChatRequest(BaseModel):
     )
 
 
+class DemoIdentityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["Viewer", "Analyst", "PropertyManager"]
+
+
 class SqlApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

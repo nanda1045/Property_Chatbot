@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from app.agents.planner import ToolPlan, validate_tool_plan
+from app.services.llm_tool_planner import LLMToolPlanner
 
 
 class PlannerPolicyTests(unittest.TestCase):
+    def test_identity_security_demo_prompt_routes_to_sql_approval_deterministically(self) -> None:
+        planner = LLMToolPlanner(
+            structured_allowlist=set(),
+            intent_router=SimpleNamespace(
+                route=lambda _message: SimpleNamespace(intent="top_balances", confidence=0.8)
+            ),
+        )
+        plan = planner.deterministic_plan(
+            "Calculate the average outstanding balance for occupied units with balances "
+            "above the property's overall average."
+        )
+
+        self.assertEqual(plan.route, "sql_approval")
+        self.assertIn("average outstanding balance", str(plan.sql_request).lower())
+
     def test_validation_removes_untrusted_scope_and_unknown_tools(self) -> None:
         plan = ToolPlan(
             route="structured",

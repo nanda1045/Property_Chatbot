@@ -437,6 +437,11 @@ class AgentRuntime:
                 None,
             )
             if pending_component is not None:
+                current_role = (
+                    trusted_authorization.primary_role.value
+                    if trusted_authorization.primary_role is not None
+                    else None
+                )
                 try:
                     authorize_permission(
                         trusted_authorization,
@@ -449,11 +454,7 @@ class AgentRuntime:
                         step_id=step_id,
                         payload={
                             "user_id": trusted_authorization.user.user_id,
-                            "role": (
-                                trusted_authorization.primary_role.value
-                                if trusted_authorization.primary_role is not None
-                                else None
-                            ),
+                            "role": current_role,
                             "property_code": state["property_code"],
                             "permission": ToolPermission.CUSTOM_ANALYTICS.value,
                             "outcome": "denied",
@@ -466,34 +467,115 @@ class AgentRuntime:
                     step_id=step_id,
                     payload={
                         "user_id": trusted_authorization.user.user_id,
-                        "role": (
-                            trusted_authorization.primary_role.value
-                            if trusted_authorization.primary_role is not None
-                            else None
-                        ),
+                        "role": current_role,
                         "property_code": state["property_code"],
                         "permission": ToolPermission.CUSTOM_ANALYTICS.value,
                         "outcome": "allowed",
                     },
                 )
                 pending_component.data["run_id"] = state["run_id"]
-                state["pending_approval"] = dict(pending_component.data)
+                pending_component.data.update(
+                    {
+                        "requested_action": pending_component.data.get("question")
+                        or state["user_goal"],
+                        "risk_level": "Privileged read-only SQL",
+                        "required_permission": ToolPermission.SQL_APPROVE.value,
+                        "required_role": "PropertyManager",
+                        "current_role": current_role,
+                        "property_code": state["property_code"],
+                        "human_approval_required": True,
+                    }
+                )
+                server_stored_proposal = dict(pending_component.data)
                 state["artifacts"].append(
                     {
                         "artifact_id": str(uuid4()),
                         "type": "generated_sql",
                         "name": "Generated SQL approval proposal",
-                        "content": dict(pending_component.data),
+                        "content": server_stored_proposal,
                     }
                 )
-                state["plan"][0]["status"] = "waiting_for_approval"
-                transition_agent_state(state, "waiting_for_approval")
                 run_store.record_event(
                     state,
                     "approval_requested",
                     step_id=step_id,
-                    payload={"approval_type": "sql", "status": "pending"},
+                    payload={
+                        "approval_type": "sql",
+                        "status": "authorization_check",
+                        "property_code": state["property_code"],
+                        "permission": ToolPermission.SQL_APPROVE.value,
+                    },
                 )
+                try:
+                    authorize_sql_approval(trusted_authorization)
+                except PermissionError:
+                    run_store.record_event(
+                        state,
+                        "SQL_APPROVAL_DENIED",
+                        step_id=step_id,
+                        payload={
+                            "user_id": trusted_authorization.user.user_id,
+                            "role": current_role,
+                            "property_code": state["property_code"],
+                            "permission": ToolPermission.SQL_APPROVE.value,
+                            "outcome": "denied",
+                            "authorization_phase": "approval_request",
+                        },
+                    )
+                    pending_component.data.update(
+                        {
+                            "authorization": "denied",
+                            "authorization_message": (
+                                "This action requires PropertyManager permission."
+                            ),
+                            "status": "authorization_denied",
+                            "executable": False,
+                        }
+                    )
+                    pending_component.data.pop("sql", None)
+                    pending_component.data.pop("parameters", None)
+                    response.tool_results.pop("sql_draft", None)
+                    response.answer_markdown += (
+                        "\n\n**This action requires PropertyManager permission.** "
+                        "The SQL draft passed safety validation, but it was not exposed "
+                        "for approval or executed."
+                    )
+                    state["observations"].append(
+                        {
+                            "type": "authorization_decision",
+                            "permission": ToolPermission.SQL_APPROVE.value,
+                            "decision": "denied",
+                            "role": current_role,
+                        }
+                    )
+                    state["plan"][0]["status"] = "completed"
+                    state["final_answer"] = response.answer_markdown
+                    transition_agent_state(state, "completed")
+                else:
+                    run_store.record_event(
+                        state,
+                        "SQL_APPROVAL_AUTHORIZED",
+                        step_id=step_id,
+                        payload={
+                            "user_id": trusted_authorization.user.user_id,
+                            "role": current_role,
+                            "property_code": state["property_code"],
+                            "permission": ToolPermission.SQL_APPROVE.value,
+                            "outcome": "allowed",
+                            "authorization_phase": "approval_request",
+                        },
+                    )
+                    pending_component.data.update(
+                        {
+                            "authorization": "allowed",
+                            "authorization_message": "Human approval is required before execution.",
+                            "status": "waiting_for_approval",
+                            "executable": True,
+                        }
+                    )
+                    state["pending_approval"] = dict(pending_component.data)
+                    state["plan"][0]["status"] = "waiting_for_approval"
+                    transition_agent_state(state, "waiting_for_approval")
             else:
                 transition_agent_state(state, "verifying")
                 run_store.save(state)
@@ -689,6 +771,7 @@ class AgentRuntime:
                     "property_code": normalized_code,
                     "permission": ToolPermission.SQL_APPROVE.value,
                     "outcome": "denied",
+                    "authorization_phase": "approval_decision",
                 },
             )
             raise
@@ -705,6 +788,7 @@ class AgentRuntime:
                 "property_code": normalized_code,
                 "permission": ToolPermission.SQL_APPROVE.value,
                 "outcome": "allowed",
+                "authorization_phase": "approval_decision",
             },
         )
 
@@ -738,6 +822,15 @@ class AgentRuntime:
             payload={
                 "approval_type": "sql",
                 "decision": "approved" if approved else "rejected",
+                "user_id": trusted_user_id,
+                "role": (
+                    trusted_authorization.primary_role.value
+                    if trusted_authorization.primary_role is not None
+                    else None
+                ),
+                "property_code": normalized_code,
+                "permission": ToolPermission.SQL_APPROVE.value,
+                "outcome": "allowed",
             },
         )
 
@@ -833,6 +926,16 @@ class AgentRuntime:
                     "rows": rows,
                 }
             )
+            run_store.record_event(
+                state,
+                "evidence_recorded",
+                step_id=step_id,
+                payload={
+                    "evidence_type": "approved_sql_result",
+                    "property_code": normalized_code,
+                    "row_count": len(rows),
+                },
+            )
             state["observations"].append(
                 {
                     "step": state["current_step"],
@@ -863,6 +966,16 @@ class AgentRuntime:
                 f"It returned **{len(rows)}** row{'s' if len(rows) != 1 else ''}."
             )
             state["final_answer"] = answer
+            run_store.record_event(
+                state,
+                "verification_succeeded",
+                step_id=step_id,
+                payload={
+                    "evidence_type": "approved_sql_result",
+                    "property_code": normalized_code,
+                    "status": "verified",
+                },
+            )
             transition_agent_state(state, "completed")
             run_store.save(state)
             run_store.record_event(

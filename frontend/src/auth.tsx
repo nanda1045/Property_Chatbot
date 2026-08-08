@@ -15,8 +15,8 @@ import {
 } from "react";
 import type { PropsWithChildren } from "react";
 
-import { getAuthenticatedUser, setAccessTokenProvider } from "./lib/api";
-import type { AuthenticatedUser } from "./types";
+import { getAuthenticatedUser, selectDemoIdentity, setAccessTokenProvider } from "./lib/api";
+import type { AuthenticatedUser, DemoRole } from "./types";
 
 const AUTH_MODE = (import.meta.env.VITE_AUTH_MODE ?? "local").toLowerCase();
 const CLIENT_ID = import.meta.env.VITE_ENTRA_CLIENT_ID ?? "";
@@ -30,6 +30,7 @@ type AuthState = {
   error: string | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  switchDemoIdentity?: (role: DemoRole) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -49,6 +50,15 @@ function LocalAuthProvider({ children }: PropsWithChildren) {
       );
   }, []);
 
+  const switchDemoIdentity = useCallback(async (role: DemoRole) => {
+    setError(null);
+    try {
+      setUser(await selectDemoIdentity(role));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to switch demo identity.");
+    }
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -57,7 +67,8 @@ function LocalAuthProvider({ children }: PropsWithChildren) {
         loading: !user && !error,
         error,
         signIn: noInteraction,
-        signOut: noInteraction
+        signOut: noInteraction,
+        switchDemoIdentity
       }}
     >
       {children}
